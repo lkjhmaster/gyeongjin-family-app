@@ -1,14 +1,24 @@
 {
-  "name":"♡ 경진훈주시라 ♡",
-  "short_name":"경진훈주시라",
-  "start_url":"./",
-  "scope":"./",
-  "display":"standalone",
-  "background_color":"#fff9fc",
-  "theme_color":"#ffd1e2",
-  "description":"우리 가족의 가계부 · 용돈기입장 · 저축 · 마이너스 통장",
-  "icons":[
-    {"src":"./icon-192.svg","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"},
-    {"src":"./icon-512.svg","sizes":"512x512","type":"image/svg+xml","purpose":"any maskable"}
+  "name": "♡ 경진훈주시라 ♡",
+  "short_name": "경진훈주시라",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fff7fb",
+  "theme_color": "#ff5a95",
+  "description": "우리 가족의 가계부 · 용돈기입장 · 저축 · 마이너스 통장",
+  "icons": [
+    {
+      "src": "./icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ]
 }
