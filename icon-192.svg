@@ -1,1 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#ffd1e2"/><path d="M256 402C225 375 104 292 104 183c0-55 43-94 94-94 30 0 49 15 58 36 9-21 28-36 58-36 51 0 94 39 94 94 0 109-121 192-152 219z" fill="#fff" stroke="#e85d8a" stroke-width="18"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#fff4f8"/>
+    <stop offset="1" stop-color="#ffd1e2"/>
+  </linearGradient>
+  <linearGradient id="heart" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8fb5"/>
+    <stop offset="1" stop-color="#e94f82"/>
+  </linearGradient>
+</defs>
+<rect width="512" height="512" rx="112" fill="url(#bg)"/>
+<path d="M256 424C224 396 88 304 88 177c0-63 48-108 106-108 31 0 50 13 62 37 12-24 31-37 62-37 58 0 106 45 106 108 0 127-136 219-168 247z" fill="url(#heart)" stroke="#d93f72" stroke-width="10"/>
+<text x="256" y="222" text-anchor="middle" fill="#fff" font-family="Noto Sans KR,Noto Sans,sans-serif" font-size="54" font-weight="800" letter-spacing="-3">경진훈</text>
+<text x="256" y="292" text-anchor="middle" fill="#fff" font-family="Noto Sans KR,Noto Sans,sans-serif" font-size="54" font-weight="800" letter-spacing="-3">주시라</text>
+<circle cx="142" cy="126" r="10" fill="#fff" opacity=".75"/>
+<circle cx="370" cy="126" r="10" fill="#fff" opacity=".75"/>
+</svg>
