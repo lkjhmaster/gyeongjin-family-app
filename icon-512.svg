@@ -1,18 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 <defs>
-  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#fff4f8"/>
-    <stop offset="1" stop-color="#ffd1e2"/>
-  </linearGradient>
-  <linearGradient id="heart" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#ff8fb5"/>
-    <stop offset="1" stop-color="#e94f82"/>
-  </linearGradient>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff5fa"/><stop offset="1" stop-color="#ffd7e6"/></linearGradient>
+<radialGradient id="heart" cx="42%" cy="28%" r="78%"><stop stop-color="#ff9fc3"/><stop offset=".5" stop-color="#ff4f8d"/><stop offset="1" stop-color="#e93672"/></radialGradient>
+<filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="9" stdDeviation="10" flood-opacity=".22"/></filter>
+<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2"/></filter>
 </defs>
 <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-<path d="M256 424C224 396 88 304 88 177c0-63 48-108 106-108 31 0 50 13 62 37 12-24 31-37 62-37 58 0 106 45 106 108 0 127-136 219-168 247z" fill="url(#heart)" stroke="#d93f72" stroke-width="10"/>
-<text x="256" y="222" text-anchor="middle" fill="#fff" font-family="Noto Sans KR,Noto Sans,sans-serif" font-size="54" font-weight="800" letter-spacing="-3">경진훈</text>
-<text x="256" y="292" text-anchor="middle" fill="#fff" font-family="Noto Sans KR,Noto Sans,sans-serif" font-size="54" font-weight="800" letter-spacing="-3">주시라</text>
-<circle cx="142" cy="126" r="10" fill="#fff" opacity=".75"/>
-<circle cx="370" cy="126" r="10" fill="#fff" opacity=".75"/>
+<path filter="url(#shadow)" d="M256 458C229 434 45 318 45 169 45 91 105 48 169 48c39 0 68 18 87 50 19-32 48-50 87-50 64 0 124 43 124 121 0 149-184 265-211 289z" fill="url(#heart)" stroke="#ed4a82" stroke-width="7"/>
+<path d="M91 143C105 92 144 77 176 79" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round" opacity=".55"/>
+<path d="M342 83c39 3 68 22 78 48" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" opacity=".45"/>
+<g font-family="Noto Sans KR,Noto Sans,sans-serif" font-weight="900" text-anchor="middle" paint-order="stroke">
+<text x="256" y="236" font-size="66" letter-spacing="-6" fill="#fff9fc" stroke="#fff" stroke-width="5">경진훈</text>
+<text x="256" y="318" font-size="66" letter-spacing="-6" fill="#ffe98a" stroke="#fff0b5" stroke-width="4">주시라</text>
+</g>
+<g fill="#fff3a6">
+<path d="M118 220c-12-20-42-8-32 14 10 22 32 32 32 32s22-10 32-32c10-22-20-34-32-14z"/>
+<path d="M394 222c-10-17-36-7-27 13 9 19 27 27 27 27s18-8 27-27c9-20-17-30-27-13z"/>
+<path d="M256 349c-12-20-43-8-33 15 10 22 33 32 33 32s23-10 33-32c10-23-21-35-33-15z"/>
+</g>
+<g fill="#fff" opacity=".8"><circle cx="129" cy="121" r="7"/><circle cx="384" cy="141" r="6"/><circle cx="101" cy="292" r="5"/><circle cx="412" cy="310" r="5"/></g>
 </svg>
