@@ -9,15 +9,15 @@
   "description": "우리 가족의 가계부 · 용돈기입장 · 저축 · 마이너스 통장",
   "icons": [
     {
-      "src": "./icon-192.svg",
+      "src": "./icon-192.jpg",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/jpeg",
       "purpose": "any maskable"
     },
     {
-      "src": "./icon-512.svg",
+      "src": "./icon-192.jpg",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/jpeg",
       "purpose": "any maskable"
     }
   ]
