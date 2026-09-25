@@ -5,12 +5,14 @@
   "start_url": "/gyeongjin-family-app/",
   "scope": "/gyeongjin-family-app/",
   "display": "standalone",
+  "prefer_related_applications": false,
   "background_color": "#fff7fb",
   "theme_color": "#ff5a95",
   "description": "우리 가족의 가계부 · 용돈기입장 · 저축 · 마이너스 통장",
   "icons": [
     {"src": "/gyeongjin-family-app/icon-192.jpg","sizes": "192x192","type": "image/jpeg","purpose": "any"},
     {"src": "/gyeongjin-family-app/icon-512.jpg","sizes": "512x512","type": "image/jpeg","purpose": "any"},
-    {"src": "/gyeongjin-family-app/icon-512.jpg","sizes": "512x512","type": "image/jpeg","purpose": "maskable"}
+    {"src": "/gyeongjin-family-app/icon-192.png","sizes": "192x192","type": "image/png","purpose": "maskable"},
+    {"src": "/gyeongjin-family-app/icon-512.png","sizes": "512x512","type": "image/png","purpose": "maskable"}
   ]
 }
