@@ -138,7 +138,7 @@ async function fetchTodayTasks(childId){
   rows.forEach(r=>{if(done.has(String(r.id)))r.completed=true;});
   return {data:rows,error:null};
 }
-async async function fetchWeekTaskStats(childId){
+async function fetchWeekTaskStats(childId){
   const start=localWeekStart(),end=localToday(),days=weekDaysElapsed(start,end);
   const {data:tasks,error}=await sb.from('allowance_tasks').select('*').eq('child_id',childId);
   if(error)return {start,end,days,totalTasks:0,expected:0,completed:0,pct:0,eligible:false,requestable:false,requestStatus:null,error};
