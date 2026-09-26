@@ -288,10 +288,12 @@ function expenseAllowanceKind(x){
 }
 function cleanExpenseMemo(x){
   let m=String(x?.memo||'사용 기록');
+  const childAllowance=m.match(/\[\[CHILD_ALLOWANCE:[^:]+::([^\]]+)\]\]/);
+  if(childAllowance?.[1])return childAllowance[1].trim();
   m=m.replace(/\[\[ALLOWANCE_KIND:(?:자유용돈|카드)\]\]\s*/g,'');
-  m=m.replace(/\[\[CHILD_ALLOWANCE:[^\]]+\]\]\s*/g,'');
   m=m.replace(/\[\[CHILD_ALLOWANCE_APPLIED:[^\]]+\]\]\s*/g,'');
   m=m.replace(/\[\[TASK_[^\]]+\]\]\s*/g,'');
+  m=m.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]\s*/g,'');
   return m.trim()||'사용 기록';
 }
 function cleanDisplayText(v){
