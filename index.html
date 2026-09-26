@@ -127,13 +127,15 @@ async function fetchTodayTasks(childId){
   const {data:tasks,error}=await sb.from('allowance_tasks').select('*').eq('child_id',childId).eq('active',true).order('created_at');
   if(error)return {data:[],error};
   const {data:reqs}=await sb.from('allowance_requests').select('id,amount,status,reason,created_at').eq('child_id',childId).eq('status','pending');
+  const {data:completions}=await sb.from('allowance_task_completions').select('task_id,task_date').eq('child_id',childId).eq('task_date',date);
   const rows=(tasks||[]).filter(t=>!String(t.title||'').startsWith('[[TASK_LOG:')).map(t=>{
     const pending=(reqs||[]).find(r=>String(r.reason||'').includes('[[TASK_APPROVAL:'+t.id+':'+date+':'));
-    return {...t,completed:false,approvalStatus:pending?.status||null,approvalRequestId:pending?.id||null};
+    return {...t,completed:(completions||[]).some(x=>String(x.task_id)===String(t.id)),approvalStatus:pending?.status||null,approvalRequestId:pending?.id||null};
   });
+  // 기존 로그 방식도 읽어 호환성을 유지합니다.
   const {data:logs}=await sb.from('allowance_tasks').select('title,completed_date').eq('child_id',childId).eq('active',false).eq('completed_date',date).ilike('title','[[TASK_LOG:%');
   const done=new Set((logs||[]).map(x=>{const v=String(x.title||'');return v.startsWith('[[TASK_LOG:')?v.slice(11,-2):''}).filter(Boolean));
-  rows.forEach(r=>{r.completed=done.has(String(r.id));});
+  rows.forEach(r=>{if(done.has(String(r.id)))r.completed=true;});
   return {data:rows,error:null};
 }
 async function fetchWeekTaskStats(childId){
@@ -141,10 +143,12 @@ async function fetchWeekTaskStats(childId){
   const {data:tasks,error}=await sb.from('allowance_tasks').select('*').eq('child_id',childId);
   if(error)return {start,end,days,totalTasks:0,expected:0,completed:0,pct:0,eligible:false,requestable:false,requestStatus:null,error};
   const active=(tasks||[]).filter(x=>x.active!==false&&!String(x.title||'').startsWith('[[TASK_LOG:'));
+  const {data:completions}=await sb.from('allowance_task_completions').select('task_id,task_date').eq('child_id',childId).gte('task_date',start).lte('task_date',end);
+  const validCompletions=new Set((completions||[]).filter(x=>active.some(t=>String(t.id)===String(x.task_id))).map(x=>String(x.task_id)+'|'+x.task_date));
+  // 기존 로그도 포함해 과거 완료 기록을 보존합니다.
   const logs=(tasks||[]).filter(x=>x.active===false&&String(x.title||'').startsWith('[[TASK_LOG:'));
-  const validLogs=new Set();
-  logs.forEach(x=>{const v=String(x.title||'');const id=v.startsWith('[[TASK_LOG:')?v.slice(11,-2):'';const d=x.completed_date;if(id&&d&&d>=start&&d<=end)validLogs.add(id+'|'+d)});
-  const expected=active.length*days,completed=validLogs.size,pct=expected?Math.min(100,Math.round(completed/expected*100)):0;
+  logs.forEach(x=>{const v=String(x.title||'');const id=v.startsWith('[[TASK_LOG:')?v.slice(11,-2):'';const d=x.completed_date;if(id&&d&&d>=start&&d<=end)validCompletions.add(id+'|'+d)});
+  const expected=active.length*days,completed=validCompletions.size,pct=expected?Math.min(100,Math.round(completed/expected*100)):0;
   let requestStatus=null;
   if(pct===100){const {data:req}=await sb.from('allowance_requests').select('id,status').eq('child_id',childId).ilike('reason','%[[TASK_WEEK_REWARD:'+start+']]%').order('created_at',{ascending:false}).limit(1);requestStatus=req?.[0]?.status||null;}
   return {start,end,days,totalTasks:active.length,expected,completed,pct,eligible:pct===100,requestable:pct===100&&requestStatus!=='pending'&&requestStatus!=='approved',requestStatus,error:null};
@@ -193,15 +197,30 @@ function dailyTaskHtml(rows,childMode=false){
 }
 async function renderTodayTasks(childId,targetId='todayTasksBox',childMode=false){const target=$(targetId);if(!target)return;await processOverdueTaskPenalties(childId);const r=await fetchTodayTasks(childId);target.innerHTML=dailyTaskHtml(r.data||[],childMode);if(r.fallback&&!parent())target.innerHTML+='<div class=\'mini\' style=\'margin-top:6px\'>기기 저장 모드</div>';const weeklyId=targetId==='todayTasksBox'?'weeklyTasksBox':targetId+'_weekly';await renderWeeklyTaskStats(childId,weeklyId,childMode)}
 async function toggleTodayTask(id,completed){
-  if(!child)return;const date=localToday();
-  const {data:task}=await sb.from('allowance_tasks').select('*').eq('id',id).eq('child_id',child.id).single();if(!task)return alert('할 일을 찾지 못했습니다.');
-  const {data:pending}=await sb.from('allowance_requests').select('id,status').eq('child_id',child.id).eq('status','pending').ilike('reason','%[[TASK_APPROVAL:'+id+':'+date+':%').limit(1);if((pending||[]).length)return alert('이미 부모 승인 대기 중입니다.');
-  const {data:existing}=await sb.from('allowance_tasks').select('id').eq('child_id',child.id).eq('active',false).eq('completed_date',date).ilike('title','[[TASK_LOG:'+id+']]%').limit(1);
+  if(!child||!user)return;
+  const date=localToday();
+  const {data:task,error:taskError}=await sb.from('allowance_tasks').select('*').eq('id',id).eq('child_id',child.id).single();
+  if(taskError||!task)return alert('할 일을 찾지 못했습니다.');
+  const {data:pending}=await sb.from('allowance_requests').select('id,status').eq('child_id',child.id).eq('status','pending').ilike('reason','%[[TASK_APPROVAL:'+id+':'+date+':%').limit(1);
+  if((pending||[]).length)return alert('이미 부모 승인 대기 중입니다.');
+  const {data:existing,error:existingError}=await sb.from('allowance_task_completions').select('id').eq('task_id',id).eq('child_id',child.id).eq('task_date',date).limit(1);
+  if(existingError)return alert('완료 상태를 확인하지 못했습니다: '+existingError.message);
   if(completed){
-    if(!(existing||[]).length){const {error:logError}=await sb.from('allowance_tasks').insert({child_id:child.id,title:'[[TASK_LOG:'+id+']]',reward_amount:0,active:false,completed_date:date,created_by:user.id,updated_by:user.id});if(logError)return alert('완료 기록 저장 실패: '+logError.message);}
+    if(!(existing||[]).length){
+      const {error:completeError}=await sb.from('allowance_task_completions').insert({task_id:id,child_id:child.id,task_date:date,completed_by:user.id});
+      if(completeError)return alert('오늘의 할 일 체크 저장 실패: '+completeError.message);
+    }
     const reward=Number(task.reward_amount||0);
-    if(reward>0){const marker='[[TASK_APPROVAL:'+id+':'+date+':completed]]',reason='[[REQUEST_CATEGORY:오늘의 할 일 완료]]'+marker+' '+String(task.title||'오늘의 할 일');const {error:reqError}=await sb.from('allowance_requests').insert({child_id:child.id,amount:reward,reason,requested_by:user.id});if(reqError)return alert('부모 승인요청 저장 실패: '+reqError.message);}
-  }else{if(existing?.[0]?.id)await sb.from('allowance_tasks').delete().eq('id',existing[0].id);}
+    if(reward>0){
+      const marker='[[TASK_APPROVAL:'+id+':'+date+':completed]]';
+      const reason='[[REQUEST_CATEGORY:오늘의 할 일 완료]]'+marker+' '+String(task.title||'오늘의 할 일');
+      const {error:reqError}=await sb.from('allowance_requests').insert({child_id:child.id,amount:reward,reason,requested_by:user.id});
+      if(reqError)return alert('부모 승인요청 저장 실패: '+reqError.message);
+    }
+  }else if(existing?.[0]?.id){
+    const {error:deleteError}=await sb.from('allowance_task_completions').delete().eq('id',existing[0].id);
+    if(deleteError)return alert('오늘의 할 일 체크 해제 실패: '+deleteError.message);
+  }
   await renderTodayTasks(child.id,'todayTasksBox',true);
 }
 function taskCardHtml(rows,childMode=false){return dailyTaskHtml(rows,childMode)}
@@ -287,9 +306,10 @@ function expenseAllowanceKind(x){
   return hit?hit[1]:'';
 }
 function cleanExpenseMemo(x){
-  let m=String(x?.memo||'사용 기록');
-  const childAllowance=m.match(/\[\[CHILD_ALLOWANCE:[^:]+::([^\]]+)\]\]/);
+  let m=String(x?.memo||'사용 기록').trim();
+  const childAllowance=m.match(/^\s*\[\[CHILD_ALLOWANCE:[^:]+::([\s\S]*?)\]\]\s*$/);
   if(childAllowance?.[1])return childAllowance[1].trim();
+  m=m.replace(/\[\[CHILD_ALLOWANCE:[^:]+::([\s\S]*?)\]\]/g,'$1');
   m=m.replace(/\[\[ALLOWANCE_KIND:(?:자유용돈|카드)\]\]\s*/g,'');
   m=m.replace(/\[\[CHILD_ALLOWANCE_APPLIED:[^\]]+\]\]\s*/g,'');
   m=m.replace(/\[\[TASK_[^\]]+\]\]\s*/g,'');
