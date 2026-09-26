@@ -128,7 +128,7 @@ async function fetchTodayTasks(childId){
   if(error)return {data:[],error};
   const {data:reqs}=await sb.from('allowance_requests').select('id,amount,status,reason,created_at').eq('child_id',childId).eq('status','pending');
   const {data:completions}=await sb.from('allowance_task_completions').select('task_id,task_date').eq('child_id',childId).eq('task_date',date);
-  const rows=(tasks||[]).filter(t=>!String(t.title||'').startsWith('[[TASK_LOG:')).map(t=>{
+  const rows=(tasks||[]).filter(t=>!String(t.title||'').startsWith('[[TASK_LOG:')&&(!t.scheduled_date||String(t.scheduled_date)===date)).map(t=>{
     const pending=(reqs||[]).find(r=>String(r.reason||'').includes('[[TASK_APPROVAL:'+t.id+':'+date+':'));
     return {...t,completed:(completions||[]).some(x=>String(x.task_id)===String(t.id)),approvalStatus:pending?.status||null,approvalRequestId:pending?.id||null};
   });
@@ -138,20 +138,25 @@ async function fetchTodayTasks(childId){
   rows.forEach(r=>{if(done.has(String(r.id)))r.completed=true;});
   return {data:rows,error:null};
 }
-async function fetchWeekTaskStats(childId){
+async async function fetchWeekTaskStats(childId){
   const start=localWeekStart(),end=localToday(),days=weekDaysElapsed(start,end);
   const {data:tasks,error}=await sb.from('allowance_tasks').select('*').eq('child_id',childId);
   if(error)return {start,end,days,totalTasks:0,expected:0,completed:0,pct:0,eligible:false,requestable:false,requestStatus:null,error};
   const active=(tasks||[]).filter(x=>x.active!==false&&!String(x.title||'').startsWith('[[TASK_LOG:'));
+  const scheduled=active.filter(x=>x.scheduled_date&&String(x.scheduled_date)>=start&&String(x.scheduled_date)<=end);
+  const legacy=active.filter(x=>!x.scheduled_date);
   const {data:completions}=await sb.from('allowance_task_completions').select('task_id,task_date').eq('child_id',childId).gte('task_date',start).lte('task_date',end);
-  const validCompletions=new Set((completions||[]).filter(x=>active.some(t=>String(t.id)===String(x.task_id))).map(x=>String(x.task_id)+'|'+x.task_date));
-  // 기존 로그도 포함해 과거 완료 기록을 보존합니다.
+  const activeIds=new Set(active.map(t=>String(t.id))),scheduledById=new Map(scheduled.map(t=>[String(t.id),String(t.scheduled_date)]));
+  const validCompletions=new Set((completions||[]).filter(x=>{
+    const tid=String(x.task_id);if(!activeIds.has(tid))return false;
+    const sd=scheduledById.get(tid);return sd?String(x.task_date)===sd:true;
+  }).map(x=>String(x.task_id)+'|'+x.task_date));
   const logs=(tasks||[]).filter(x=>x.active===false&&String(x.title||'').startsWith('[[TASK_LOG:'));
   logs.forEach(x=>{const v=String(x.title||'');const id=v.startsWith('[[TASK_LOG:')?v.slice(11,-2):'';const d=x.completed_date;if(id&&d&&d>=start&&d<=end)validCompletions.add(id+'|'+d)});
-  const expected=active.length*days,completed=validCompletions.size,pct=expected?Math.min(100,Math.round(completed/expected*100)):0;
+  const expected=scheduled.length+(legacy.length*days),completed=validCompletions.size,pct=expected?Math.min(100,Math.round(completed/expected*100)):0;
   let requestStatus=null;
   if(pct===100){const {data:req}=await sb.from('allowance_requests').select('id,status').eq('child_id',childId).ilike('reason','%[[TASK_WEEK_REWARD:'+start+']]%').order('created_at',{ascending:false}).limit(1);requestStatus=req?.[0]?.status||null;}
-  return {start,end,days,totalTasks:active.length,expected,completed,pct,eligible:pct===100,requestable:pct===100&&requestStatus!=='pending'&&requestStatus!=='approved',requestStatus,error:null};
+  return {start,end,days,totalTasks:scheduled.length+legacy.length,expected,completed,pct,eligible:pct===100,requestable:pct===100&&requestStatus!=='pending'&&requestStatus!=='approved',requestStatus,error:null};
 }
 function weeklyTaskHtml(stats,childMode=false){
   const status=stats.requestStatus==='pending'?'요청 대기 중':stats.requestStatus==='approved'?'보상 지급 완료':'';
@@ -181,6 +186,7 @@ async function processOverdueTaskPenalties(childId){
     const {data:existing}=await sb.from('allowance_requests').select('reason,status').eq('child_id',childId).ilike('reason','%[[TASK_APPROVAL:%');
     for(const task of (tasks||[])){
       const reward=Number(task.reward_amount||0);if(!(reward<0)||String(task.title||'').startsWith('[[TASK_LOG:'))continue;
+      const scheduledDate=task.scheduled_date?String(task.scheduled_date):prev;if(scheduledDate!==prev)continue;
       const createdDate=task.created_at?String(task.created_at).slice(0,10):prev;if(createdDate>prev||completedIds.has(String(task.id)))continue;
       const marker='[[TASK_APPROVAL:'+task.id+':'+prev+':missed]]';if((existing||[]).some(x=>String(x.reason||'').includes(marker)))continue;
       const reason='[[REQUEST_CATEGORY:오늘의 할 일 미이행]]'+marker+' '+String(task.title||'오늘의 할 일');
@@ -225,23 +231,108 @@ async function toggleTodayTask(id,completed){
 }
 function taskCardHtml(rows,childMode=false){return dailyTaskHtml(rows,childMode)}
 async function taskManageAll(){
-  if(!parent())return alert('부모만 할 일을 관리할 수 있습니다.');
-  const {data:children,error}=await sb.from('allowance_children').select('id,name').order('created_at');if(error)return alert('자녀 목록을 불러오지 못했습니다: '+error.message);const orderedChildren=sortChildren(children);
-  openModal(`<h2>🌱 오늘의 할 일 관리</h2><div class="row"><select id="taskChild" onchange="loadTaskManage()">${(orderedChildren||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><button class="primary smallbtn" onclick="taskAddForm()">➕ 할 일 추가</button></div><div id="taskManageList"></div><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);
-  loadTaskManage();
+  if(!parent())return alert('부모만 1주 계획을 관리할 수 있습니다.');
+  const {data:children,error}=await sb.from('allowance_children').select('id,name').order('created_at');
+  if(error)return alert('자녀 목록을 불러오지 못했습니다: '+error.message);
+  const orderedChildren=sortChildren(children),defaultChild=orderedChildren?.[0]?.id||'';
+  openModal(`<h2>🌱 오늘의 할 일 1주 계획</h2><div class="row"><div><label>자녀</label><select id="taskChild" onchange="loadWeeklyTaskPlan()">${(orderedChildren||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div><label>주 시작일(월요일)</label><input id="taskWeekStart" type="date" value="${localWeekStart()}" onchange="loadWeeklyTaskPlan()"></div></div><div class="note" style="margin-top:8px">월요일부터 일요일까지 이번 주 할 일을 미리 계획합니다. 자녀에게는 해당 날짜의 오늘 할 일만 표시됩니다.</div><div id="weeklyPlanList" style="margin-top:10px"></div><button class="primary" onclick="saveWeeklyPlan()">💾 1주 계획 저장</button><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);
+  if(defaultChild)$('taskChild').value=defaultChild;
+  loadWeeklyTaskPlan();
 }
-async function loadTaskManage(){
-  const cid=$('taskChild')?.value;if(!cid)return;const r=await fetchTodayTasks(cid);const box=$('taskManageList');if(!box)return;
-  box.innerHTML=(r.data||[]).map(x=>{const reward=Number(x.reward_amount||0);const label=reward>0?'+'+money(reward):reward<0?'−'+money(Math.abs(reward)):'보상 없음';return `<div class="child-card" style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center"><div><b>${esc(x.title)}</b><div class="mini">보상 ${label} · 매일 · ${x.completed?'오늘 완료':'오늘 미완료'}</div></div><button class="primary smallbtn" onclick="taskEditForm('${x.id}')">수정</button><button class="danger smallbtn" onclick="taskDelete('${x.id}')">삭제</button></div>`}).join('')||'<div class="empty">오늘 등록된 할 일이 없습니다.</div>';
+function weeklyPlanDate(start,offset){const d=new Date(start+'T00:00:00');d.setDate(d.getDate()+offset);const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
+function weeklyPlanDayName(date){return ['일','월','화','수','목','금','토'][new Date(date+'T00:00:00').getDay()]}
+function weeklyPlanCapture(){
+  const rows=window.__weeklyPlanRows||[];
+  rows.forEach(r=>{r.title=($('wpTitle_'+r.rid)?.value||'').trim();r.reward=Number($('wpReward_'+r.rid)?.value||0);});
+  return rows;
 }
-async function taskAddForm(){
-  openModal(`<h2>➕ 오늘의 할 일 추가</h2><label>할 일</label><input id="taskTitle" maxlength="100" placeholder="예: 숙제하기"><label>보상금액</label><input id="taskReward" type="number" step="1" value="0"><div class="note">+ 금액은 완료 보상, − 금액은 다음날 미이행 시 부모 승인 후 카드 차감입니다.</div><button class="primary" onclick="saveTask()">저장</button><button class="secondary" style="margin-top:8px" onclick="taskManageAll()">취소</button>`);
+function weeklyPlanRender(){
+  const box=$('weeklyPlanList');if(!box)return;
+  const rows=window.__weeklyPlanRows||[],start=$('taskWeekStart')?.value||localWeekStart();
+  let h='';
+  for(let d=0;d<7;d++){
+    const date=weeklyPlanDate(start,d),dayRows=rows.filter(r=>r.date===date);
+    h+=`<div class="child-card"><div class="topline"><div><b>${weeklyPlanDayName(date)}요일</b><div class="mini">${date}</div></div><button class="secondary smallbtn" onclick="weeklyPlanAddRow('${date}')">➕ 할 일</button></div>`;
+    h+=dayRows.map(r=>`<div class="goal" style="display:grid;grid-template-columns:1fr 100px 42px;gap:7px;align-items:center"><input id="wpTitle_${r.rid}" maxlength="100" value="${esc(r.title||'')}" placeholder="할 일"><input id="wpReward_${r.rid}" type="number" step="1" value="${Number(r.reward||0)}" placeholder="보상"><button type="button" class="danger smallbtn" onclick="weeklyPlanRemoveRow('${r.rid}')">삭제</button></div>`).join('');
+    if(!dayRows.length)h+=`<div class="empty" style="padding:12px">등록된 계획이 없습니다.</div>`;
+    h+='</div>';
+  }
+  box.innerHTML=h;
 }
-async function taskEditForm(id){const {data:r,error}=await sb.from('allowance_tasks').select('*').eq('id',id).single();if(error)return alert('할 일을 불러오지 못했습니다: '+error.message);openModal(`<h2>✏️ 할 일 수정</h2><label>할 일</label><input id="taskTitle" maxlength="100" value="${esc(r.title)}"><label>보상금액</label><input id="taskReward" type="number" step="1" value="${Number(r.reward_amount)||0}"><div class="note">+ 금액은 완료 보상, − 금액은 다음날 미이행 시 부모 승인 후 카드 차감입니다.</div><button class="primary" onclick="saveTask('${id}')">저장</button><button class="secondary" style="margin-top:8px" onclick="taskManageAll()">취소</button>`)}
-async function saveTask(id=''){
-  if(!parent())return alert('부모만 할 일을 관리할 수 있습니다.');const childId=$('taskChild')?.value;const title=$('taskTitle')?.value.trim();const reward=Number($('taskReward')?.value||0);if(!childId||!title||!Number.isFinite(reward))return alert('할 일과 보상금액을 확인해주세요.');let r;if(id)r=await sb.from('allowance_tasks').update({title,reward_amount:reward,updated_by:user.id,updated_at:new Date().toISOString()}).eq('id',id);else r=await sb.from('allowance_tasks').insert({child_id:childId,title,reward_amount:reward,active:true,completed_date:null,created_by:user.id,updated_by:user.id});if(r.error)return alert('할 일 저장 실패: '+r.error.message);taskManageAll();}
-async function taskDelete(id){if(!parent())return;if(!confirm('이 할 일을 삭제할까요?'))return;const {error}=await sb.from('allowance_tasks').delete().eq('id',id);if(error)return alert('삭제 실패: '+error.message);loadTaskManage()}
-async function renderAllowanceParent(){const {data:children}=await sb.from('allowance_children').select('*').order('created_at');const orderedChildren=sortChildren(children);$('main').innerHTML=shell('🎒 자녀 용돈기입장',`<section class="card"><div class="topline"><h2 style="margin:0">자녀 관리</h2><div class="row" style="justify-content:flex-end"><button class="secondary smallbtn" onclick="manageRequestCategories()">⚙️ 용돈 요청 항목 설정</button><button class="primary smallbtn" onclick="taskManageAll()">🌱 오늘의 할 일 관리</button></div></div>${(orderedChildren||[]).map(c=>`<div class="child-card"><div class="child-head"><span class="child-name">${esc(c.name)}</span><span class="pill">${c.user_id?'계정 연결됨':'계정 미연결'}</span></div><div class="mini">로그인 ID: ${esc(c.login_id||'미설정')}</div><div class="grid3"><button class="secondary smallbtn" onclick="childDetail('${c.id}')">현황</button><button class="secondary smallbtn" onclick="childAccount('${c.id}')">계정관리</button><button class="secondary smallbtn" onclick="childLoan('${c.id}')">마이너스통장</button></div><div id="parentTasks_${c.id}" style="margin-top:12px"></div><div id="parentTasks_${c.id}_weekly" style="margin-top:8px"></div></div>`).join('')}</section><section class="card"><h2>🔔 승인 대기</h2><div id="allowPending"></div></section>`);window.parentTaskChildIds=(orderedChildren||[]).map(c=>c.id);(orderedChildren||[]).forEach(c=>renderTodayTasks(c.id,'parentTasks_'+c.id,false));loadAllowancePending()}
+async function loadWeeklyTaskPlan(){
+  const cid=$('taskChild')?.value,start=$('taskWeekStart')?.value;
+  if(!cid||!start)return;
+  if(new Date(start+'T00:00:00').getDay()!==1)return alert('주 시작일은 월요일로 선택해주세요.');
+  const end=weeklyPlanDate(start,6);
+  const {data:scheduled,error}=await sb.from('allowance_tasks').select('*').eq('child_id',cid).eq('active',true).gte('scheduled_date',start).lte('scheduled_date',end).order('scheduled_date').order('created_at');
+  if(error)return alert('주간 계획을 불러오지 못했습니다: '+error.message);
+  let rows=(scheduled||[]).map((x,i)=>({rid:'db_'+i+'_'+String(x.id).slice(0,8),id:x.id,date:String(x.scheduled_date),title:x.title,reward:Number(x.reward_amount||0)}));
+  window.__weeklyPlanOriginalIds=new Set((scheduled||[]).map(x=>String(x.id)));
+  window.__weeklyPlanLegacyIds=new Set();
+  if(!rows.length){
+    const {data:legacy}=await sb.from('allowance_tasks').select('*').eq('child_id',cid).eq('active',true).is('scheduled_date',null).order('created_at');
+    rows=(legacy||[]).flatMap((x)=>Array.from({length:7},(_,d)=>({rid:'legacy_'+d+'_'+String(x.id).slice(0,8),date:weeklyPlanDate(start,d),title:x.title,reward:Number(x.reward_amount||0)})));
+    window.__weeklyPlanLegacyIds=new Set((legacy||[]).map(x=>String(x.id)));
+  }
+  window.__weeklyPlanRows=rows;
+  window.__weeklyPlanOriginalRows=rows.filter(r=>r.id).map(r=>({...r}));
+  window.__weeklyPlanNextRid=1;
+  weeklyPlanRender();
+}
+function weeklyPlanAddRow(date){
+  weeklyPlanCapture();
+  const n=window.__weeklyPlanNextRid||1;
+  (window.__weeklyPlanRows||[]).push({rid:'new_'+n,date,title:'',reward:0});
+  window.__weeklyPlanNextRid=n+1;
+  weeklyPlanRender();
+}
+function weeklyPlanRemoveRow(rid){
+  weeklyPlanCapture();
+  window.__weeklyPlanRows=(window.__weeklyPlanRows||[]).filter(r=>r.rid!==rid);
+  weeklyPlanRender();
+}
+async function saveWeeklyPlan(){
+  if(!parent())return alert('부모만 1주 계획을 저장할 수 있습니다.');
+  const cid=$('taskChild')?.value,start=$('taskWeekStart')?.value;
+  if(!cid||!start)return alert('자녀와 주 시작일을 확인해주세요.');
+  if(new Date(start+'T00:00:00').getDay()!==1)return alert('주 시작일은 월요일이어야 합니다.');
+  const allRows=weeklyPlanCapture();
+  if(allRows.some(r=>!String(r.title||'').trim()))return alert('내용이 비어 있는 할 일이 있습니다. 삭제하거나 내용을 입력해주세요.');
+  const rows=allRows.filter(r=>String(r.title||'').trim()),now=new Date().toISOString();
+  const originalRows=window.__weeklyPlanOriginalRows||[],currentIds=new Set(rows.filter(r=>r.id).map(r=>String(r.id)));
+  const removedIds=originalRows.map(r=>String(r.id)).filter(id=>!currentIds.has(id));
+  if(removedIds.length){
+    const {error}=await sb.from('allowance_tasks').update({active:false,updated_by:user.id,updated_at:now}).in('id',removedIds);
+    if(error)return alert('삭제할 계획 정리 실패: '+error.message);
+  }
+  for(const r of rows.filter(r=>r.id)){
+    const {error}=await sb.from('allowance_tasks').update({title:r.title,reward_amount:Number.isFinite(r.reward)?r.reward:0,scheduled_date:r.date,active:true,updated_by:user.id,updated_at:now}).eq('id',r.id);
+    if(error)return alert('주간 계획 수정 실패: '+error.message);
+  }
+  const legacyIds=[...(window.__weeklyPlanLegacyIds||[])];
+  if(legacyIds.length){
+    const {error}=await sb.from('allowance_tasks').update({active:false,updated_by:user.id,updated_at:now}).in('id',legacyIds);
+    if(error)return alert('기존 매일 할 일 전환 실패: '+error.message);
+  }
+  const newRows=rows.filter(r=>!r.id).map(r=>({child_id:cid,title:r.title,reward_amount:Number.isFinite(r.reward)?r.reward:0,active:true,scheduled_date:r.date,completed_date:null,created_by:user.id,updated_by:user.id}));
+  if(newRows.length){
+    const {error}=await sb.from('allowance_tasks').insert(newRows);
+    if(error)return alert('1주 계획 저장 실패: '+error.message);
+  }
+  alert('1주 계획을 저장했습니다.');
+  taskManageAll();
+}
+async function loadTaskManage(){return loadWeeklyTaskPlan()}
+async function taskAddForm(){return weeklyPlanAddRow($('taskWeekStart')?.value||localWeekStart())}
+async function taskEditForm(id){return alert('주간 계획 화면에서 할 일을 직접 수정해주세요.')}
+async function saveTask(){return saveWeeklyPlan()}
+async function taskDelete(id){
+  if(!parent())return;
+  weeklyPlanCapture();
+  window.__weeklyPlanRows=(window.__weeklyPlanRows||[]).filter(r=>String(r.id)!==String(id));
+  weeklyPlanRender();
+}
+async function renderAllowanceParent(){const {data:children}=await sb.from('allowance_children').select('*').order('created_at');const orderedChildren=sortChildren(children);$('main').innerHTML=shell('🎒 자녀 용돈기입장',`<section class="card"><div class="topline"><h2 style="margin:0">자녀 관리</h2><div class="row" style="justify-content:flex-end"><button class="secondary smallbtn" onclick="manageRequestCategories()">⚙️ 용돈 요청 항목 설정</button><button class="primary smallbtn" onclick="taskManageAll()">🌱 오늘의 할 일 1주 계획</button></div></div>${(orderedChildren||[]).map(c=>`<div class="child-card"><div class="child-head"><span class="child-name">${esc(c.name)}</span><span class="pill">${c.user_id?'계정 연결됨':'계정 미연결'}</span></div><div class="mini">로그인 ID: ${esc(c.login_id||'미설정')}</div><div class="grid3"><button class="secondary smallbtn" onclick="childDetail('${c.id}')">현황</button><button class="secondary smallbtn" onclick="childAccount('${c.id}')">계정관리</button><button class="secondary smallbtn" onclick="childLoan('${c.id}')">마이너스통장</button></div><div id="parentTasks_${c.id}" style="margin-top:12px"></div><div id="parentTasks_${c.id}_weekly" style="margin-top:8px"></div></div>`).join('')}</section><section class="card"><h2>🔔 승인 대기</h2><div id="allowPending"></div></section>`);window.parentTaskChildIds=(orderedChildren||[]).map(c=>c.id);(orderedChildren||[]).forEach(c=>renderTodayTasks(c.id,'parentTasks_'+c.id,false));loadAllowancePending()}
 
 function parseTaskApprovalReason(reason){
   const raw=String(reason||''),completePrefix='[[REQUEST_CATEGORY:오늘의 할 일 완료]][[TASK_APPROVAL:',missedPrefix='[[REQUEST_CATEGORY:오늘의 할 일 미이행]][[TASK_APPROVAL:';
@@ -354,7 +445,7 @@ async function goalAdd(){openModal(`<h2>🎯 저축 목표</h2><label>목표 이
 async function saveGoal(){const {error}=await sb.from('allowance_goals').insert({child_id:child.id,title:$('gt').value,target_amount:Number($('ga').value),created_by:user.id});if(error)alert(error.message);else{closeModal();loadGoals()}}
 function subscribe(){if(window.__taskPenaltyTimer)clearInterval(window.__taskPenaltyTimer);window.__taskPenaltyTimer=setInterval(async()=>{try{if(parent()){const {data:cs}=await sb.from('allowance_children').select('id');for(const c of (cs||[]))await processOverdueTaskPenalties(c.id);if($('main').innerHTML.includes('자녀 용돈기입장'))loadAllowancePending()}else if(child){await processOverdueTaskPenalties(child.id)}}catch(e){console.warn('미이행 보상 자동 처리 확인 실패',e.message)}},60000);channel=sb.channel('family-live').on('postgres_changes',{event:'*',schema:'public',table:'allowance_entries'},()=>{if(parent()&&$('main').innerHTML.includes('자녀 용돈기입장'))renderAllowanceParent();if(!parent())renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_requests'},()=>{if(parent())loadParentPending()}).on('postgres_changes',{event:'*',schema:'public',table:'loan_requests'},()=>{if(parent())loadParentPending()}).on('postgres_changes',{event:'*',schema:'public',table:'loan_transactions'},()=>{if(!parent())renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_tasks'},()=>{if(!parent()&&child)renderTodayTasks(child.id,'todayTasksBox',true);if(parent()&&Array.isArray(window.parentTaskChildIds))window.parentTaskChildIds.forEach(id=>renderTodayTasks(id,'parentTasks_'+id,false));}).subscribe()}
 async function logout(){hideNoticeFab();if(channel)sb.removeChannel(channel);await sb.auth.signOut();location.reload()}
-window.toggleTodayTask=toggleTodayTask;window.taskManageAll=taskManageAll;window.loadTaskManage=loadTaskManage;window.taskAddForm=taskAddForm;window.taskEditForm=taskEditForm;window.saveTask=saveTask;window.taskDelete=taskDelete;window.renderBudget=renderBudget;window.renderAllowanceParent=renderAllowanceParent;window.renderParentHome=renderParentHome;window.goHome=goHome;window.homeClick=homeClick;window.openNoticeList=openNoticeList;window.openNoticeDetail=openNoticeDetail;window.noticeForm=noticeForm;window.saveNotice=saveNotice;window.deleteNotice=deleteNotice;window.renderBudgetForm=renderBudgetForm;window.renderBudgetFixed=renderBudgetFixed;window.renderBudgetStats=renderBudgetStats;window.renderBudgetForm=renderBudgetForm;window.renderBudgetStats=renderBudgetStats;window.renderParentHome=renderParentHome;window.childDetail=childDetail;window.allowanceAuditActors=allowanceAuditActors;window.parentEntryForm=parentEntryForm;window.parentEntryTypeChanged=parentEntryTypeChanged;window.saveParentEntry=saveParentEntry;window.childAccount=childAccount;window.childLoan=childLoan;window.saveLoanLimit=saveLoanLimit;window.addLoanTransaction=addLoanTransaction;window.updateLoanTransaction=updateLoanTransaction;window.saveChildAccount=saveChildAccount;window.budgetAdd=budgetAdd;window.budgetDel=budgetDel;window.fixedAdd=fixedAdd;window.fixedDel=fixedDel;window.fixedKindChanged=fixedKindChanged;window.syncChildAllowanceRecurring=syncChildAllowanceRecurring;window.filterBudget=filterBudget;window.decide=decide;window.decideTaskApproval=decideTaskApproval;window.decideTaskApproval=decideTaskApproval;window.renderChildHome=renderChildHome;window.fetchWeekTaskStats=fetchWeekTaskStats;window.renderWeeklyTaskStats=renderWeeklyTaskStats;window.requestWeeklyTaskReward=requestWeeklyTaskReward;window.childEntries=childEntries;window.allowanceRequest=allowanceRequest;window.childExpenseForm=childExpenseForm;window.saveChildExpense=saveChildExpense;window.sendAllowanceRequest=sendAllowanceRequest;window.manageRequestCategories=manageRequestCategories;window.addRequestCategory=addRequestCategory;window.updateRequestCategory=updateRequestCategory;window.removeRequestCategory=removeRequestCategory;window.loanRequest=loanRequest;window.sendLoan=sendLoan;window.goalAdd=goalAdd;window.saveGoal=saveGoal;window.loadGoals=loadGoals;window.closeModal=closeModal;window.openModal=openModal;window.logout=logout;$('loginBtn').onclick=login;$('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});sb.auth.getSession().then(async({data})=>{if(data.session){user=data.session.user;await boot()}}).catch(e=>message('앱 초기화 오류: '+e.message));
+window.toggleTodayTask=toggleTodayTask;window.taskManageAll=taskManageAll;window.loadTaskManage=loadTaskManage;window.taskAddForm=taskAddForm;window.taskEditForm=taskEditForm;window.saveTask=saveTask;window.taskDelete=taskDelete;window.loadWeeklyTaskPlan=loadWeeklyTaskPlan;window.weeklyPlanAddRow=weeklyPlanAddRow;window.weeklyPlanRemoveRow=weeklyPlanRemoveRow;window.saveWeeklyPlan=saveWeeklyPlan;window.renderBudget=renderBudget;window.renderAllowanceParent=renderAllowanceParent;window.renderParentHome=renderParentHome;window.goHome=goHome;window.homeClick=homeClick;window.openNoticeList=openNoticeList;window.openNoticeDetail=openNoticeDetail;window.noticeForm=noticeForm;window.saveNotice=saveNotice;window.deleteNotice=deleteNotice;window.renderBudgetForm=renderBudgetForm;window.renderBudgetFixed=renderBudgetFixed;window.renderBudgetStats=renderBudgetStats;window.renderBudgetForm=renderBudgetForm;window.renderBudgetStats=renderBudgetStats;window.renderParentHome=renderParentHome;window.childDetail=childDetail;window.allowanceAuditActors=allowanceAuditActors;window.parentEntryForm=parentEntryForm;window.parentEntryTypeChanged=parentEntryTypeChanged;window.saveParentEntry=saveParentEntry;window.childAccount=childAccount;window.childLoan=childLoan;window.saveLoanLimit=saveLoanLimit;window.addLoanTransaction=addLoanTransaction;window.updateLoanTransaction=updateLoanTransaction;window.saveChildAccount=saveChildAccount;window.budgetAdd=budgetAdd;window.budgetDel=budgetDel;window.fixedAdd=fixedAdd;window.fixedDel=fixedDel;window.fixedKindChanged=fixedKindChanged;window.syncChildAllowanceRecurring=syncChildAllowanceRecurring;window.filterBudget=filterBudget;window.decide=decide;window.decideTaskApproval=decideTaskApproval;window.decideTaskApproval=decideTaskApproval;window.renderChildHome=renderChildHome;window.fetchWeekTaskStats=fetchWeekTaskStats;window.renderWeeklyTaskStats=renderWeeklyTaskStats;window.requestWeeklyTaskReward=requestWeeklyTaskReward;window.childEntries=childEntries;window.allowanceRequest=allowanceRequest;window.childExpenseForm=childExpenseForm;window.saveChildExpense=saveChildExpense;window.sendAllowanceRequest=sendAllowanceRequest;window.manageRequestCategories=manageRequestCategories;window.addRequestCategory=addRequestCategory;window.updateRequestCategory=updateRequestCategory;window.removeRequestCategory=removeRequestCategory;window.loanRequest=loanRequest;window.sendLoan=sendLoan;window.goalAdd=goalAdd;window.saveGoal=saveGoal;window.loadGoals=loadGoals;window.closeModal=closeModal;window.openModal=openModal;window.logout=logout;$('loginBtn').onclick=login;$('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});sb.auth.getSession().then(async({data})=>{if(data.session){user=data.session.user;await boot()}}).catch(e=>message('앱 초기화 오류: '+e.message));
 })().catch(e=>{const m=document.getElementById('loginMsg');if(m){m.textContent='앱 연결 오류: '+e.message;m.className='status error'}});
 </script>
 <script>
