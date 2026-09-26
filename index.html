@@ -60,14 +60,8 @@ function renderParentHome(){ $('main').className=''; $('main').style.backgroundI
 async function loadParentPending(){const [{data:a},{data:l}]=await Promise.all([sb.from('allowance_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),sb.from('loan_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false})]);const all=[...(a||[]).map(x=>({...x,kind:'용돈',text:`${x.allowance_children?.name} · ${money(x.amount)} · ${allowanceRequestDisplay(x.reason||'용돈 요청')}`})),...(l||[]).map(x=>({...x,kind:x.request_type==='borrow'?'대출':'상환',text:`${x.allowance_children?.name} · ${money(x.amount)} · ${x.reason||x.kind}`}))].sort((x,y)=>childRank(x.allowance_children?.name)-childRank(y.allowance_children?.name));$('parentPending').innerHTML=all.length?all.map(x=>`<div class="child-card"><b>${x.kind}</b><div>${esc(x.text)}</div><div class="row"><button class="primary smallbtn" onclick="decide('${x.kind}','${x.id}',true)">승인</button><button class="danger smallbtn" onclick="decide('${x.kind}','${x.id}',false)">거절</button></div></div>`).join(''):'<div class="empty">대기 중인 요청이 없습니다 🌱</div>'}
 
 async function decide(kind,id,ok){
-  if(kind==='용돈'){
-    const {data:req,error:loadError}=await sb.from('allowance_requests').select('*').eq('id',id).single();
-    if(loadError)return alert('요청을 불러오지 못했습니다: '+loadError.message);
-    if(String(req.reason||'').includes('[[TASK_APPROVAL:'))return decideTaskApproval(id,ok);
-  }
-  const fn=kind==='용돈'?'decide_allowance_request':'decide_loan_request';
-  const {error}=await sb.rpc(fn,{p_request_id:id,p_approve:ok});
-  if(error)alert('처리 실패: '+error.message);else loadAllowancePending();
+  if(kind==='용돈'){const {data:req,error:loadError}=await sb.from('allowance_requests').select('*').eq('id',id).single();if(loadError)return alert('요청을 불러오지 못했습니다: '+loadError.message);if(String(req.reason||'').includes('[[TASK_APPROVAL:'))return decideTaskApproval(id,ok);}
+  const fn=kind==='용돈'?'decide_allowance_request':'decide_loan_request';const {error}=await sb.rpc(fn,{p_request_id:id,p_approve:ok});if(error)alert('처리 실패: '+error.message);else loadAllowancePending();
 }
 async function renderBudget(){
  $('main').innerHTML=shell('💰 부부 가계부',`<section class="card"><div class="menu"><button onclick="renderBudgetForm()">✏️ 내역 입력<small>수입 · 지출</small></button><button onclick="renderBudgetFixed()">🔁 고정지출<small>매달 자동 적용</small></button><button onclick="renderBudgetStats()">📊 통계<small>월별 · 검색</small></button><button onclick="renderParentHome()">🏠 통합 홈<small>메인으로</small></button></div></section><section class="card" id="budgetBox"><div class="empty">기능을 선택해주세요.</div></section>`)}
@@ -134,12 +128,11 @@ async function fetchTodayTasks(childId){
   if(error)return {data:[],error};
   const {data:reqs}=await sb.from('allowance_requests').select('id,amount,status,reason,created_at').eq('child_id',childId).eq('status','pending');
   const rows=(tasks||[]).filter(t=>!String(t.title||'').startsWith('[[TASK_LOG:')).map(t=>{
-    const marker=new RegExp('\\\\[\\\\[TASK_APPROVAL:'+String(t.id).replace(/[.*+?^$()|[\\]\\\\]/g,'\\\\$&')+':'+date+':(completed|missed)\\\\]\\\\]');
-    const pending=(reqs||[]).find(r=>marker.test(String(r.reason||'')));
+    const pending=(reqs||[]).find(r=>String(r.reason||'').includes('[[TASK_APPROVAL:'+t.id+':'+date+':'));
     return {...t,completed:false,approvalStatus:pending?.status||null,approvalRequestId:pending?.id||null};
   });
   const {data:logs}=await sb.from('allowance_tasks').select('title,completed_date').eq('child_id',childId).eq('active',false).eq('completed_date',date).ilike('title','[[TASK_LOG:%');
-  const done=new Set((logs||[]).map(x=>{const m=String(x.title||'').match(/^\\[\\[TASK_LOG:([^\\]]+)\\]\\]/);return m?m[1]:''}).filter(Boolean));
+  const done=new Set((logs||[]).map(x=>{const v=String(x.title||'');return v.startsWith('[[TASK_LOG:')?v.slice(11,-2):''}).filter(Boolean));
   rows.forEach(r=>{r.completed=done.has(String(r.id));});
   return {data:rows,error:null};
 }
@@ -150,90 +143,65 @@ async function fetchWeekTaskStats(childId){
   const active=(tasks||[]).filter(x=>x.active!==false&&!String(x.title||'').startsWith('[[TASK_LOG:'));
   const logs=(tasks||[]).filter(x=>x.active===false&&String(x.title||'').startsWith('[[TASK_LOG:'));
   const validLogs=new Set();
-  logs.forEach(x=>{const m=String(x.title||'').match(/^\\[\\[TASK_LOG:([^\\]]+)\\]\\]/);const d=x.completed_date;if(m&&d&&d>=start&&d<=end)validLogs.add(m[1]+'|'+d)});
+  logs.forEach(x=>{const v=String(x.title||'');const id=v.startsWith('[[TASK_LOG:')?v.slice(11,-2):'';const d=x.completed_date;if(id&&d&&d>=start&&d<=end)validLogs.add(id+'|'+d)});
   const expected=active.length*days,completed=validLogs.size,pct=expected?Math.min(100,Math.round(completed/expected*100)):0;
   let requestStatus=null;
-  if(pct===100){
-    const {data:req}=await sb.from('allowance_requests').select('id,status').eq('child_id',childId).ilike('reason',`[[REQUEST_CATEGORY:주간 달성 보상]][[TASK_WEEK_REWARD:${{start}]]%`).order('created_at',{ascending:false}).limit(1);
-    requestStatus=req?.[0]?.status||null;
-  }
+  if(pct===100){const {data:req}=await sb.from('allowance_requests').select('id,status').eq('child_id',childId).ilike('reason','%[[TASK_WEEK_REWARD:'+start+']]%').order('created_at',{ascending:false}).limit(1);requestStatus=req?.[0]?.status||null;}
   return {start,end,days,totalTasks:active.length,expected,completed,pct,eligible:pct===100,requestable:pct===100&&requestStatus!=='pending'&&requestStatus!=='approved',requestStatus,error:null};
 }
 function weeklyTaskHtml(stats,childMode=false){
-  const label=${{stats.start} ~ ${{stats.end},status=stats.requestStatus==='pending'?'요청 대기 중':stats.requestStatus==='approved'?'보상 지급 완료':'';
-  return `<div class="weekly-rate"><div class="weekly-rate-head"><div><b>📅 주간 달성률</b><div class="mini">월요일 ~ 오늘 · ${{label}</div></div><div class="weekly-rate-value">${{stats.pct}%</div></div><div class="task-progress"><i style="width:${{stats.pct}%"></i></div><div class="mini">${{stats.completed}/${{stats.expected}회 완료 · ${{stats.totalTasks}개 할 일</div>${{childMode?`<div class="reward-request"><button class="primary smallbtn" ${{stats.requestable?'':'disabled'} onclick="requestWeeklyTaskReward()">🎁 500원 보상요청${{status?' · '+status:''}</button></div>`:(stats.eligible?'<div class="mini" style="margin-top:8px">🎁 500원 보상 요청 가능</div>':'')}${{status?`<div class="mini" style="margin-top:6px">${{status}</div>`:''}</div>`;
+  const status=stats.requestStatus==='pending'?'요청 대기 중':stats.requestStatus==='approved'?'보상 지급 완료':'';
+  let h=`<div class='weekly-rate'><div class='weekly-rate-head'><div><b>📅 주간 달성률</b><div class='mini'>월요일 ~ 오늘 · ${stats.start} ~ ${stats.end}</div></div><div class='weekly-rate-value'>${stats.pct}%</div></div><div class='task-progress'><i style='width:${stats.pct}%'></i></div><div class='mini'>${stats.completed}/${stats.expected}회 완료 · ${stats.totalTasks}개 할 일</div>`;
+  if(childMode)h+=`<div class='reward-request'><button class='primary smallbtn' ${stats.requestable?'':'disabled'} onclick='requestWeeklyTaskReward()'>🎁 500원 보상요청${status?' · '+status:''}</button></div>`;else if(stats.eligible)h+=`<div class='mini' style='margin-top:8px'>🎁 500원 보상 요청 가능</div>`;
+  if(status)h+=`<div class='mini' style='margin-top:6px'>${status}</div>`;
+  return h+'</div>';
 }
 async function renderWeeklyTaskStats(childId,targetId,childMode=false){const target=$(targetId);if(!target)return;const stats=await fetchWeekTaskStats(childId);target.innerHTML=weeklyTaskHtml(stats,childMode);return stats}
 async function requestWeeklyTaskReward(){
   if(parent()||!child)return alert('자녀 계정에서만 보상요청을 할 수 있습니다.');
   const stats=await fetchWeekTaskStats(child.id);
   if(!stats.requestable)return alert(stats.pct===100?'이미 이번 주 보상 요청이 처리 중이거나 지급되었습니다.':'1주간 달성률이 100%가 되어야 요청할 수 있습니다.');
-  const reason=`[[REQUEST_CATEGORY:주간 달성 보상]][[TASK_WEEK_REWARD:${{stats.start}]] 이번 주 오늘의 할 일 100% 달성 보상`;
+  const reason='[[REQUEST_CATEGORY:주간 달성 보상]][[TASK_WEEK_REWARD:'+stats.start+']] 이번 주 오늘의 할 일 100% 달성 보상';
   const {error}=await sb.from('allowance_requests').insert({child_id:child.id,amount:500,reason,requested_by:user.id});
   if(error)return alert('보상 요청 실패: '+error.message);
-  alert('부모에게 500원 보상 승인 요청을 보냈습니다.');
-  await renderWeeklyTaskStats(child.id,'weeklyTasksBox',true);
+  alert('부모에게 500원 보상 승인 요청을 보냈습니다.');await renderWeeklyTaskStats(child.id,'weeklyTasksBox',true);
 }
-function taskPenaltyDate(daysAgo=1){const d=new Date(localToday()+'T00:00:00');d.setDate(d.getDate()-daysAgo);const z=n=>String(n).padStart(2,'0');return ${{d.getFullYear()}-${{z(d.getMonth()+1)}-${{z(d.getDate())}${}
+function taskPenaltyDate(daysAgo=1){const d=new Date(localToday()+'T00:00:00');d.setDate(d.getDate()-daysAgo);const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 async function processOverdueTaskPenalties(childId){
-  if(!childId||!user)return;
-  const prev=taskPenaltyDate(1);
-  const lockKey=${{childId}|${{prev};
-  window.__taskPenaltyLocks=window.__taskPenaltyLocks||new Set();
-  if(window.__taskPenaltyLocks.has(lockKey))return;
-  window.__taskPenaltyLocks.add(lockKey);
+  if(!childId||!user)return;const prev=taskPenaltyDate(1),lockKey=childId+'|'+prev;
+  window.__taskPenaltyLocks=window.__taskPenaltyLocks||new Set();if(window.__taskPenaltyLocks.has(lockKey))return;window.__taskPenaltyLocks.add(lockKey);
   try{
     const {data:tasks}=await sb.from('allowance_tasks').select('*').eq('child_id',childId).eq('active',true);
     const {data:logs}=await sb.from('allowance_tasks').select('title,completed_date').eq('child_id',childId).eq('active',false).eq('completed_date',prev).ilike('title','[[TASK_LOG:%');
-    const completedIds=new Set((logs||[]).map(x=>{const m=String(x.title||'').match(/^\\[\\[TASK_LOG:([^\\]]+)\\]\\]/);return m?m[1]:''}).filter(Boolean));
+    const completedIds=new Set((logs||[]).map(x=>{const v=String(x.title||'');return v.startsWith('[[TASK_LOG:')?v.slice(11,-2):''}).filter(Boolean));
     const {data:existing}=await sb.from('allowance_requests').select('reason').eq('child_id',childId).eq('status','pending').ilike('reason','%[[TASK_APPROVAL:%');
     for(const task of (tasks||[])){
-      const reward=Number(task.reward_amount||0);
-      if(!(reward<0)||String(task.title||'').startsWith('[[TASK_LOG:'))continue;
-      const createdDate=task.created_at?String(task.created_at).slice(0,10):prev;
-      if(createdDate>prev||completedIds.has(String(task.id)))continue;
-      const marker=`[[TASK_APPROVAL:${{task.id}:${{prev}:missed]]`;
-      if((existing||[]).some(x=>String(x.reason||'').includes(marker)))continue;
-      const reason=`[[REQUEST_CATEGORY:오늘의 할 일 미이행]]${{marker} ${{String(task.title||'오늘의 할 일')}`;
-      const {error}=await sb.from('allowance_requests').insert({child_id:childId,amount:Math.abs(reward),reason,requested_by:user.id});
-      if(error)console.warn('오늘의 할 일 미이행 승인요청 생성 실패',error.message);
+      const reward=Number(task.reward_amount||0);if(!(reward<0)||String(task.title||'').startsWith('[[TASK_LOG:'))continue;
+      const createdDate=task.created_at?String(task.created_at).slice(0,10):prev;if(createdDate>prev||completedIds.has(String(task.id)))continue;
+      const marker='[[TASK_APPROVAL:'+task.id+':'+prev+':missed]]';if((existing||[]).some(x=>String(x.reason||'').includes(marker)))continue;
+      const reason='[[REQUEST_CATEGORY:오늘의 할 일 미이행]]'+marker+' '+String(task.title||'오늘의 할 일');
+      const {error}=await sb.from('allowance_requests').insert({child_id:childId,amount:Math.abs(reward),reason,requested_by:user.id});if(error)console.warn('오늘의 할 일 미이행 승인요청 생성 실패',error.message);
     }
   }finally{window.__taskPenaltyLocks.delete(lockKey)}
 }
 function dailyTaskHtml(rows,childMode=false){
   const total=(rows||[]).length,done=(rows||[]).filter(x=>x.completed).length,pct=total?Math.round(done/total*100):0;
-  return `<div class="task-head"><div><b>🌱 오늘의 할 일</b><div class="mini">일일 달성률 · ${{done}/${{total} 완료</div></div><div class="weekly-rate-value">${{pct}%</div>${{!childMode?'<button class="secondary smallbtn" onclick="taskManageAll()">⚙️ 관리</button>':''}</div><div class="task-progress"><i style="width:${{pct}%"></i></div>${{(rows||[]).map(x=>{const reward=Number(x.reward_amount||0),rewardText=reward>0?'+'+money(reward):reward<0?'−'+money(Math.abs(reward)):'보상 없음',state=x.approvalStatus==='pending'?'승인 대기':x.completed?'체크 완료':'미체크';return `<div class="task-row ${{x.completed?'done':''}"><button class="task-check" ${{x.approvalStatus==='pending'||x.approvalStatus==='approved'?'disabled':''} onclick="${{childMode?`toggleTodayTask('${{x.id}',${{x.completed?'false':'true'})`:'void(0)'}">${{x.completed?'✓':'○'}</button><div class="task-title"><b>${{esc(x.title)}</b><div class="mini">${{state}</div></div><div class="task-reward">${{rewardText}</div></div>`}).join('')||'<div class="empty">오늘의 할 일이 없습니다.</div>'}${{childMode?'<div class="note" style="margin-top:10px">체크하면 부모 승인 대기로 넘어갑니다. 날짜가 지나도 미체크이면 부모 승인 대기로 넘어갑니다.</div>':''}</div>`;
+  let h=`<div class='task-head'><div><b>🌱 오늘의 할 일</b><div class='mini'>일일 달성률 · ${done}/${total} 완료</div></div><div class='weekly-rate-value'>${pct}%</div>`;
+  if(!childMode)h+=`<button class='secondary smallbtn' onclick='taskManageAll()'>⚙️ 관리</button>`;h+='</div><div class=\'task-progress\'><i style=\'width:'+pct+'%\'></i></div>';
+  h+=(rows||[]).map(x=>{const reward=Number(x.reward_amount||0),rewardText=reward>0?'+'+money(reward):reward<0?'−'+money(Math.abs(reward)):'보상 없음',state=x.approvalStatus==='pending'?'승인 대기':x.completed?'체크 완료':'미체크';return `<div class='task-row ${x.completed?'done':''}'><button class='task-check' ${x.approvalStatus==='pending'||x.approvalStatus==='approved'?'disabled':''} onclick='${childMode?'toggleTodayTask("'+x.id+'",'+(x.completed?'false':'true')+')':'void(0)'}'>${x.completed?'✓':'○'}</button><div class='task-title'><b>${esc(x.title)}</b><div class='mini'>${state}</div></div><div class='task-reward'>${rewardText}</div></div>`}).join('')||'<div class=\'empty\'>오늘의 할 일이 없습니다.</div>';
+  if(childMode)h+=`<div class='note' style='margin-top:10px'>체크하면 부모 승인 대기로 넘어갑니다. 날짜가 지나도 미체크이면 부모 승인 대기로 넘어갑니다.</div>`;return h;
 }
-async function renderTodayTasks(childId,targetId='todayTasksBox',childMode=false){
-  const target=$(targetId);if(!target)return;
-  await processOverdueTaskPenalties(childId);
-  const r=await fetchTodayTasks(childId);
-  target.innerHTML=dailyTaskHtml(r.data||[],childMode);
-  if(r.fallback&&!parent())target.innerHTML+='<div class="mini" style="margin-top:6px">기기 저장 모드</div>';
-  const weeklyId=targetId==='todayTasksBox'?'weeklyTasksBox':targetId+'_weekly';
-  await renderWeeklyTaskStats(childId,weeklyId,childMode);
-}
+async function renderTodayTasks(childId,targetId='todayTasksBox',childMode=false){const target=$(targetId);if(!target)return;await processOverdueTaskPenalties(childId);const r=await fetchTodayTasks(childId);target.innerHTML=dailyTaskHtml(r.data||[],childMode);if(r.fallback&&!parent())target.innerHTML+='<div class=\'mini\' style=\'margin-top:6px\'>기기 저장 모드</div>';const weeklyId=targetId==='todayTasksBox'?'weeklyTasksBox':targetId+'_weekly';await renderWeeklyTaskStats(childId,weeklyId,childMode)}
 async function toggleTodayTask(id,completed){
-  if(!child)return;
-  const date=localToday();
-  const {data:task}=await sb.from('allowance_tasks').select('*').eq('id',id).eq('child_id',child.id).single();
-  if(!task)return alert('할 일을 찾지 못했습니다.');
-  const {data:pending}=await sb.from('allowance_requests').select('id,status').eq('child_id',child.id).eq('status','pending').ilike('reason',`%[[TASK_APPROVAL:${{id}:${{date}:%`).limit(1);
-  if((pending||[]).length)return alert('이미 부모 승인 대기 중입니다.');
-  const {data:existing}=await sb.from('allowance_tasks').select('id').eq('child_id',child.id).eq('active',false).eq('completed_date',date).ilike('title',`[[TASK_LOG:${{id}]]%`).limit(1);
+  if(!child)return;const date=localToday();
+  const {data:task}=await sb.from('allowance_tasks').select('*').eq('id',id).eq('child_id',child.id).single();if(!task)return alert('할 일을 찾지 못했습니다.');
+  const {data:pending}=await sb.from('allowance_requests').select('id,status').eq('child_id',child.id).eq('status','pending').ilike('reason','%[[TASK_APPROVAL:'+id+':'+date+':%').limit(1);if((pending||[]).length)return alert('이미 부모 승인 대기 중입니다.');
+  const {data:existing}=await sb.from('allowance_tasks').select('id').eq('child_id',child.id).eq('active',false).eq('completed_date',date).ilike('title','[[TASK_LOG:'+id+']]%').limit(1);
   if(completed){
-    if(!(existing||[]).length){
-      const {error:logError}=await sb.from('allowance_tasks').insert({child_id:child.id,title:`[[TASK_LOG:${{id}]]`,reward_amount:0,active:false,completed_date:date,created_by:user.id,updated_by:user.id});
-      if(logError)return alert('완료 기록 저장 실패: '+logError.message);
-    }
-    const reward=Number(task.reward_amount||0);
-    const marker=`[[TASK_APPROVAL:${{id}:${{date}:completed]]`;
-    const reason=`[[REQUEST_CATEGORY:오늘의 할 일 완료]]${{marker} ${{String(task.title||'오늘의 할 일')}`;
-    const {error:reqError}=await sb.from('allowance_requests').insert({child_id:child.id,amount:Math.max(0,reward),reason,requested_by:user.id});
-    if(reqError)return alert('부모 승인요청 저장 실패: '+reqError.message);
-  }else{
-    if(existing?.[0]?.id)await sb.from('allowance_tasks').delete().eq('id',existing[0].id);
-  }
+    if(!(existing||[]).length){const {error:logError}=await sb.from('allowance_tasks').insert({child_id:child.id,title:'[[TASK_LOG:'+id+']]',reward_amount:0,active:false,completed_date:date,created_by:user.id,updated_by:user.id});if(logError)return alert('완료 기록 저장 실패: '+logError.message);}
+    const reward=Number(task.reward_amount||0),marker='[[TASK_APPROVAL:'+id+':'+date+':completed]]',reason='[[REQUEST_CATEGORY:오늘의 할 일 완료]]'+marker+' '+String(task.title||'오늘의 할 일');
+    const {error:reqError}=await sb.from('allowance_requests').insert({child_id:child.id,amount:Math.max(0,reward),reason,requested_by:user.id});if(reqError)return alert('부모 승인요청 저장 실패: '+reqError.message);
+  }else{if(existing?.[0]?.id)await sb.from('allowance_tasks').delete().eq('id',existing[0].id);}
   await renderTodayTasks(child.id,'todayTasksBox',true);
 }
 function taskCardHtml(rows,childMode=false){return dailyTaskHtml(rows,childMode)}
@@ -256,39 +224,30 @@ async function saveTask(id=''){
 async function taskDelete(id){if(!parent())return;if(!confirm('이 할 일을 삭제할까요?'))return;const {error}=await sb.from('allowance_tasks').delete().eq('id',id);if(error)return alert('삭제 실패: '+error.message);loadTaskManage()}
 async function renderAllowanceParent(){const {data:children}=await sb.from('allowance_children').select('*').order('created_at');const orderedChildren=sortChildren(children);$('main').innerHTML=shell('🎒 자녀 용돈기입장',`<section class="card"><div class="topline"><h2 style="margin:0">자녀 관리</h2><div class="row" style="justify-content:flex-end"><button class="secondary smallbtn" onclick="manageRequestCategories()">⚙️ 용돈 요청 항목 설정</button><button class="primary smallbtn" onclick="taskManageAll()">🌱 오늘의 할 일 관리</button></div></div>${(orderedChildren||[]).map(c=>`<div class="child-card"><div class="child-head"><span class="child-name">${esc(c.name)}</span><span class="pill">${c.user_id?'계정 연결됨':'계정 미연결'}</span></div><div class="mini">로그인 ID: ${esc(c.login_id||'미설정')}</div><div class="grid3"><button class="secondary smallbtn" onclick="childDetail('${c.id}')">현황</button><button class="secondary smallbtn" onclick="childAccount('${c.id}')">계정관리</button><button class="secondary smallbtn" onclick="childLoan('${c.id}')">마이너스통장</button></div><div id="parentTasks_${c.id}" style="margin-top:12px"></div><div id="parentTasks_${c.id}_weekly" style="margin-top:8px"></div></div>`).join('')}</section><section class="card"><h2>🔔 승인 대기</h2><div id="allowPending"></div></section>`);window.parentTaskChildIds=(orderedChildren||[]).map(c=>c.id);(orderedChildren||[]).forEach(c=>renderTodayTasks(c.id,'parentTasks_'+c.id,false));loadAllowancePending()}
 
+function parseTaskApprovalReason(reason){
+  const raw=String(reason||''),completePrefix='[[REQUEST_CATEGORY:오늘의 할 일 완료]][[TASK_APPROVAL:',missedPrefix='[[REQUEST_CATEGORY:오늘의 할 일 미이행]][[TASK_APPROVAL:';
+  const outcome=raw.startsWith(completePrefix)?'completed':raw.startsWith(missedPrefix)?'missed':'';if(!outcome)return null;
+  const marker=outcome==='completed'?completePrefix:missedPrefix,start=marker.length,end=raw.indexOf(']]',start);if(end<0)return null;
+  const parts=raw.slice(start,end).split(':');if(parts.length<3)return null;return {outcome,taskId:parts[0],date:parts[1],title:raw.slice(end+2).trim()};
+}
 async function loadAllowancePending(){
-  const [{data:a},{data:l}]=await Promise.all([
-    sb.from('allowance_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),
-    sb.from('loan_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false})
-  ]);
+  const [{data:a},{data:l}]=await Promise.all([sb.from('allowance_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),sb.from('loan_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false})]);
   const arr=[...(a||[]).map(x=>({k:'용돈',x})),...(l||[]).map(x=>({k:x.request_type==='borrow'?'빌리기':'갚기',x}))].sort((x,y)=>childRank(x.x.allowance_children?.name)-childRank(y.x.allowance_children?.name));
   $('allowPending').innerHTML=arr.length?arr.map(o=>{
-    const p=o.k==='용돈'?parseAllowanceReason(o.x.reason):{category:'',memo:o.x.reason||''};
-    const task=String(o.x.reason||'').match(/^\\[\\[REQUEST_CATEGORY:(오늘의 할 일 완료|오늘의 할 일 미이행)\\]\\]\\[\\[TASK_APPROVAL:([^:]+):(\\d{4}-\\d{2}-\\d{2}):(completed|missed)\\]\\]\\s*(.*)$/s);
-    if(task){
-      const sign=task[3]==='completed'?'+':'−',kind=task[3]==='completed'?'자유용돈':'카드';
-      return `<div class="child-card"><b>${{esc(o.x.allowance_children?.name)} · 오늘의 할 일</b><div><b>${{esc(task[4]||'할 일')}</b></div><div class="mini">${{task[2]} · ${{task[3]==='completed'?'체크 완료':'미이행'} · 기본 보상 ${{sign}${{money(Math.abs(Number(o.x.amount||0)))}</div><div class="row" style="margin-top:8px"><label style="flex:1">반영 금액<input id="taskAmt_${{o.x.id}" type="number" min="0" value="${{Math.abs(Number(o.x.amount||0))}"></label><label style="flex:1">용돈 유형<select id="taskKind_${{o.x.id}"><option value="자유용돈" ${{kind==='자유용돈'?'selected':''}>자유용돈</option><option value="카드" ${{kind==='카드'?'selected':''}>카드</option></select></label></div><div class="row"><button class="primary smallbtn" onclick="decideTaskApproval('${{o.x.id}',true)">승인</button><button class="danger smallbtn" onclick="decideTaskApproval('${{o.x.id}',false)">거절</button></div></div>`;
-    }
-    return `<div class="child-card"><b>${{esc(o.x.allowance_children?.name)} · ${{o.k}${{p.category?` · 🎁 ${{esc(p.category)}`:''}</b><div>${{money(o.x.amount)}${{p.memo?` · ${{esc(allowanceRequestDisplay(p.memo))}`:''}</div><div class="row"><button class="primary smallbtn" onclick="decide('${{o.k==='용돈'?'용돈':'대출'}','${{o.x.id}',true)">승인</button><button class="danger smallbtn" onclick="decide('${{o.k==='용돈'?'용돈':'대출'}','${{o.x.id}',false)">거절</button></div></div>`;
-  }).join(''):'<div class="empty">승인 대기 없음 🌱</div>';
+    const p=o.k==='용돈'?parseAllowanceReason(o.x.reason):{category:'',memo:o.x.reason||''},task=parseTaskApprovalReason(o.x.reason);
+    if(task){const sign=task.outcome==='completed'?'+':'−',kind=task.outcome==='completed'?'자유용돈':'카드';return `<div class='child-card'><b>${esc(o.x.allowance_children?.name)} · 오늘의 할 일</b><div><b>${esc(task.title||'할 일')}</b></div><div class='mini'>${task.date} · ${task.outcome==='completed'?'체크 완료':'미이행'} · 기본 보상 ${sign}${money(Math.abs(Number(o.x.amount||0)))}</div><div class='row' style='margin-top:8px'><label style='flex:1'>반영 금액<input id='taskAmt_${o.x.id}' type='number' min='0' value='${Math.abs(Number(o.x.amount||0))}'></label><label style='flex:1'>용돈 유형<select id='taskKind_${o.x.id}'><option value='자유용돈' ${kind==='자유용돈'?'selected':''}>자유용돈</option><option value='카드' ${kind==='카드'?'selected':''}>카드</option></select></label></div><div class='row'><button class='primary smallbtn' onclick='decideTaskApproval("${o.x.id}",true)'>승인</button><button class='danger smallbtn' onclick='decideTaskApproval("${o.x.id}",false)'>거절</button></div></div>`;}
+    return `<div class='child-card'><b>${esc(o.x.allowance_children?.name)} · ${o.k}${p.category?' · 🎁 '+esc(p.category):''}</b><div>${money(o.x.amount)}${p.memo?' · '+esc(allowanceRequestDisplay(p.memo)):''}</div><div class='row'><button class='primary smallbtn' onclick='decide("${o.k==='용돈'?'용돈':'대출'}","${o.x.id}",true)'>승인</button><button class='danger smallbtn' onclick='decide("${o.k==='용돈'?'용돈':'대출'}","${o.x.id}",false)'>거절</button></div></div>`;
+  }).join(''):'<div class=\'empty\'>승인 대기 없음 🌱</div>';
 }
 async function decideTaskApproval(id,ok){
-  if(!parent())return;
-  const {data:req,error}=await sb.from('allowance_requests').select('*').eq('id',id).single();
-  if(error)return alert('승인 요청을 불러오지 못했습니다: '+error.message);
-  const m=String(req.reason||'').match(/^\\[\\[REQUEST_CATEGORY:(오늘의 할 일 완료|오늘의 할 일 미이행)\\]\\]\\[\\[TASK_APPROVAL:([^:]+):(\\d{4}-\\d{2}-\\d{2}):(completed|missed)\\]\\]/);
-  if(!m)return alert('오늘의 할 일 승인 요청 형식이 올바르지 않습니다.');
+  if(!parent())return;const {data:req,error}=await sb.from('allowance_requests').select('*').eq('id',id).single();if(error)return alert('승인 요청을 불러오지 못했습니다: '+error.message);
+  const m=parseTaskApprovalReason(req.reason);if(!m)return alert('오늘의 할 일 승인 요청 형식이 올바르지 않습니다.');
   if(!ok){const {error:e}=await sb.from('allowance_requests').update({status:'rejected'}).eq('id',id);if(e)return alert('거절 처리 실패: '+e.message);loadAllowancePending();return;}
-  const amount=Math.abs(Number($('taskAmt_'+id)?.value||req.amount||0)),kind=$('taskKind_'+id)?.value||(m[3]==='completed'?'자유용돈':'카드');
-  if(!Number.isFinite(amount)||amount<0)return alert('반영 금액을 확인해주세요.');
-  const type=m[3]==='completed'?'income':'expense';
-  const memo=`오늘의 할 일 · ${{m[4]||'할 일'}`;
-  let ins=await sb.from('allowance_entries').insert({child_id:req.child_id,type,category:'오늘의 할 일',memo,amount,date:m[2],entered_by:user.id,allowance_type:kind});
-  if(ins.error&&/allowance_type/i.test(ins.error.message||''))ins=await sb.from('allowance_entries').insert({child_id:req.child_id,type,category:'오늘의 할 일',memo:`[[ALLOWANCE_KIND:${{kind}]] ${{memo}`,amount,date:m[2],entered_by:user.id});
-  if(ins.error)return alert('용돈 반영 실패: '+ins.error.message);
-  const {error:updateError}=await sb.from('allowance_requests').update({status:'approved',amount}).eq('id',id);
-  if(updateError)return alert('승인 상태 저장 실패: '+updateError.message);
-  loadAllowancePending();
+  const amount=Math.abs(Number($('taskAmt_'+id)?.value||req.amount||0)),kind=$('taskKind_'+id)?.value||(m.outcome==='completed'?'자유용돈':'카드');if(!Number.isFinite(amount)||amount<0)return alert('반영 금액을 확인해주세요.');
+  const type=m.outcome==='completed'?'income':'expense',memo='오늘의 할 일 · '+(m.title||'할 일');
+  let ins=await sb.from('allowance_entries').insert({child_id:req.child_id,type,category:'오늘의 할 일',memo,amount,date:m.date,entered_by:user.id,allowance_type:kind});
+  if(ins.error&&/allowance_type/i.test(ins.error.message||''))ins=await sb.from('allowance_entries').insert({child_id:req.child_id,type,category:'오늘의 할 일',memo:'[[ALLOWANCE_KIND:'+kind+']] '+memo,amount,date:m.date,entered_by:user.id});
+  if(ins.error)return alert('용돈 반영 실패: '+ins.error.message);const {error:updateError}=await sb.from('allowance_requests').update({status:'approved',amount}).eq('id',id);if(updateError)return alert('승인 상태 저장 실패: '+updateError.message);loadAllowancePending();
 }
 async function childDetail(id){const [{data:c},{data:e},{data:g}]=await Promise.all([sb.from('allowance_children').select('*').eq('id',id).single(),sb.from('allowance_entries').select('*').eq('child_id',id).order('date',{ascending:false}),sb.from('allowance_goals').select('*').eq('child_id',id).eq('active',true)]);const i=(e||[]).filter(x=>x.type==='income').reduce((a,x)=>a+Number(x.amount),0),o=(e||[]).filter(x=>x.type==='expense').reduce((a,x)=>a+Number(x.amount),0),freeIncome=(e||[]).filter(x=>x.type==='income'&&incomeKind(x)==='자유용돈').reduce((a,x)=>a+Number(x.amount),0),cardIncome=(e||[]).filter(x=>x.type==='income'&&incomeKind(x)==='카드').reduce((a,x)=>a+Number(x.amount),0),freeExpense=(e||[]).filter(x=>x.type==='expense'&&expenseAllowanceKind(x)==='자유용돈').reduce((a,x)=>a+Number(x.amount),0),cardExpense=(e||[]).filter(x=>x.type==='expense'&&expenseAllowanceKind(x)==='카드').reduce((a,x)=>a+Number(x.amount),0),free=freeIncome-freeExpense,card=cardIncome-cardExpense;const actors=await allowanceAuditActors(e||[]);const [{data:lt},{data:loanLimitRow}]=await Promise.all([sb.from('loan_transactions').select('*').eq('child_id',id),sb.from('child_loans').select('credit_limit').eq('child_id',id).maybeSingle()]);const debt=Math.max(0,(lt||[]).reduce((a,x)=>a+(x.transaction_type==='borrow'?1:-1)*Number(x.amount),0));const loanLimit=Number(loanLimitRow?.credit_limit||0);const loanRemain=Math.max(0,loanLimit-debt);$('main').className='';$('main').style.backgroundImage='';$('main').innerHTML=shell(`🎒 ${esc(c.name)}`,`<section class="card"><div class="topline"><h2 style="margin:0">용돈 현황</h2><div class="row" style="justify-content:flex-end"><button class="secondary smallbtn" onclick="manageRequestCategories()">⚙️ 요청 항목 설정</button><button class="secondary smallbtn" onclick="parentEntryForm('${id}')">➕ 부모 직접 입력</button></div></div><div class="summary"><div class="sum"><span>💰 수입</span><b>${money(i)}</b></div><div class="sum"><span>💸 지출</span><b>${money(o)}</b></div><div class="sum"><span>💵 잔액</span><b>${money(i-o)}</b></div></div><div class="income-split"><div class="income-kind"><span>자유용돈 잔액</span><b>${money(free)}</b></div><div class="income-kind card-kind"><span>카드 잔액</span><b>${money(card)}</b></div></div></section><section class="card"><h2>💳 마이너스 통장</h2><div class="loanbox"><div class="mini">💳 사용 가능 금액</div><div class="loanbig">${money(loanRemain)}</div><div class="note">대출 한도 ${money(loanLimit)} · 현재 빌린 금액 ${money(debt)}</div></div></section><section class="card"><h2>🎯 저축 목표</h2>${(g||[]).map(x=>`<div class="goal"><b>${esc(x.title)}</b><div class="mini">${money(x.saved_amount)} / ${money(x.target_amount)}</div><div class="progress"><i style="width:${Math.min(100,Number(x.saved_amount)/Number(x.target_amount)*100)}%"></i></div></div>`).join('')||'<div class="empty">등록된 목표가 없습니다.</div>'}</section><section class="card"><h2>📒 최근 내역</h2>${(e||[]).slice(0,30).map(x=>`<div class="item"><div class="icon">${icons[x.category]||'🧾'}</div><div><div class="memo">${esc(cleanExpenseMemo(x))}${incomeKindBadge(x)}</div><div class="meta">${x.date} · ${esc(x.category)}</div>${allowanceActorMeta(actors[x.id])}</div><div class="amt ${x.type}">${x.type==='income'?'+':'−'}${money(x.amount)}</div><span></span></div>`).join('')||'<div class="empty">내역이 없습니다.</div>'}</section>`)}
 async function parentEntryForm(id){const {data:c}=await sb.from('allowance_children').select('name').eq('id',id).single();openModal(`<h2>➕ ${esc(c?.name||'자녀')} 내역 직접 입력</h2><label>날짜</label><input id="peDate" type="date" value="${new Date().toISOString().slice(0,10)}"><label>구분</label><select id="peType" onchange="parentEntryTypeChanged()"><option value="income">수입</option><option value="expense">지출</option></select><div id="peKindBox"><label>용돈 유형</label><select id="peKind"><option value="자유용돈">자유용돈</option><option value="카드">카드</option></select></div><div id="peExpenseBox"><label>지출 카테고리</label><select id="peCategory"><option>식비</option><option>교통</option><option>쇼핑</option><option>생활</option><option>문화</option><option>의료</option><option>교육</option><option>기타</option></select></div><label>내용</label><input id="peMemo" required placeholder="예: 9월 자유용돈 / 점심"><label>금액</label><input id="peAmount" type="number" min="1" required><button class="primary" onclick="saveParentEntry('${id}')">저장</button><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);parentEntryTypeChanged()}
@@ -350,7 +309,7 @@ async function goalAdd(){openModal(`<h2>🎯 저축 목표</h2><label>목표 이
 async function saveGoal(){const {error}=await sb.from('allowance_goals').insert({child_id:child.id,title:$('gt').value,target_amount:Number($('ga').value),created_by:user.id});if(error)alert(error.message);else{closeModal();loadGoals()}}
 function subscribe(){if(window.__taskPenaltyTimer)clearInterval(window.__taskPenaltyTimer);window.__taskPenaltyTimer=setInterval(async()=>{try{if(parent()){const {data:cs}=await sb.from('allowance_children').select('id');for(const c of (cs||[]))await processOverdueTaskPenalties(c.id);if($('main').innerHTML.includes('자녀 용돈기입장'))loadAllowancePending()}else if(child){await processOverdueTaskPenalties(child.id)}}catch(e){console.warn('미이행 보상 자동 처리 확인 실패',e.message)}},60000);channel=sb.channel('family-live').on('postgres_changes',{event:'*',schema:'public',table:'allowance_entries'},()=>{if(parent()&&$('main').innerHTML.includes('자녀 용돈기입장'))renderAllowanceParent();if(!parent())renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_requests'},()=>{if(parent())loadParentPending()}).on('postgres_changes',{event:'*',schema:'public',table:'loan_requests'},()=>{if(parent())loadParentPending()}).on('postgres_changes',{event:'*',schema:'public',table:'loan_transactions'},()=>{if(!parent())renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_tasks'},()=>{if(!parent()&&child)renderTodayTasks(child.id,'todayTasksBox',true);if(parent()&&Array.isArray(window.parentTaskChildIds))window.parentTaskChildIds.forEach(id=>renderTodayTasks(id,'parentTasks_'+id,false));}).subscribe()}
 async function logout(){hideNoticeFab();if(channel)sb.removeChannel(channel);await sb.auth.signOut();location.reload()}
-window.renderBudget=renderBudget;window.renderAllowanceParent=renderAllowanceParent;window.renderParentHome=renderParentHome;window.goHome=goHome;window.homeClick=homeClick;window.openNoticeList=openNoticeList;window.openNoticeDetail=openNoticeDetail;window.noticeForm=noticeForm;window.saveNotice=saveNotice;window.deleteNotice=deleteNotice;window.renderBudgetForm=renderBudgetForm;window.renderBudgetFixed=renderBudgetFixed;window.renderBudgetStats=renderBudgetStats;window.renderBudgetForm=renderBudgetForm;window.renderBudgetStats=renderBudgetStats;window.renderParentHome=renderParentHome;window.childDetail=childDetail;window.allowanceAuditActors=allowanceAuditActors;window.parentEntryForm=parentEntryForm;window.parentEntryTypeChanged=parentEntryTypeChanged;window.saveParentEntry=saveParentEntry;window.childAccount=childAccount;window.childLoan=childLoan;window.saveLoanLimit=saveLoanLimit;window.addLoanTransaction=addLoanTransaction;window.updateLoanTransaction=updateLoanTransaction;window.saveChildAccount=saveChildAccount;window.budgetAdd=budgetAdd;window.budgetDel=budgetDel;window.fixedAdd=fixedAdd;window.fixedDel=fixedDel;window.fixedKindChanged=fixedKindChanged;window.syncChildAllowanceRecurring=syncChildAllowanceRecurring;window.filterBudget=filterBudget;window.decide=decide;window.decideTaskApproval=decideTaskApproval;window.renderChildHome=renderChildHome;window.fetchWeekTaskStats=fetchWeekTaskStats;window.renderWeeklyTaskStats=renderWeeklyTaskStats;window.requestWeeklyTaskReward=requestWeeklyTaskReward;window.childEntries=childEntries;window.allowanceRequest=allowanceRequest;window.childExpenseForm=childExpenseForm;window.saveChildExpense=saveChildExpense;window.sendAllowanceRequest=sendAllowanceRequest;window.manageRequestCategories=manageRequestCategories;window.addRequestCategory=addRequestCategory;window.updateRequestCategory=updateRequestCategory;window.removeRequestCategory=removeRequestCategory;window.loanRequest=loanRequest;window.sendLoan=sendLoan;window.goalAdd=goalAdd;window.saveGoal=saveGoal;window.loadGoals=loadGoals;window.closeModal=closeModal;window.openModal=openModal;window.logout=logout;$('loginBtn').onclick=login;$('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});sb.auth.getSession().then(async({data})=>{if(data.session){user=data.session.user;await boot()}}).catch(e=>message('앱 초기화 오류: '+e.message));
+window.renderBudget=renderBudget;window.renderAllowanceParent=renderAllowanceParent;window.renderParentHome=renderParentHome;window.goHome=goHome;window.homeClick=homeClick;window.openNoticeList=openNoticeList;window.openNoticeDetail=openNoticeDetail;window.noticeForm=noticeForm;window.saveNotice=saveNotice;window.deleteNotice=deleteNotice;window.renderBudgetForm=renderBudgetForm;window.renderBudgetFixed=renderBudgetFixed;window.renderBudgetStats=renderBudgetStats;window.renderBudgetForm=renderBudgetForm;window.renderBudgetStats=renderBudgetStats;window.renderParentHome=renderParentHome;window.childDetail=childDetail;window.allowanceAuditActors=allowanceAuditActors;window.parentEntryForm=parentEntryForm;window.parentEntryTypeChanged=parentEntryTypeChanged;window.saveParentEntry=saveParentEntry;window.childAccount=childAccount;window.childLoan=childLoan;window.saveLoanLimit=saveLoanLimit;window.addLoanTransaction=addLoanTransaction;window.updateLoanTransaction=updateLoanTransaction;window.saveChildAccount=saveChildAccount;window.budgetAdd=budgetAdd;window.budgetDel=budgetDel;window.fixedAdd=fixedAdd;window.fixedDel=fixedDel;window.fixedKindChanged=fixedKindChanged;window.syncChildAllowanceRecurring=syncChildAllowanceRecurring;window.filterBudget=filterBudget;window.decide=decide;window.decideTaskApproval=decideTaskApproval;window.decideTaskApproval=decideTaskApproval;window.renderChildHome=renderChildHome;window.fetchWeekTaskStats=fetchWeekTaskStats;window.renderWeeklyTaskStats=renderWeeklyTaskStats;window.requestWeeklyTaskReward=requestWeeklyTaskReward;window.childEntries=childEntries;window.allowanceRequest=allowanceRequest;window.childExpenseForm=childExpenseForm;window.saveChildExpense=saveChildExpense;window.sendAllowanceRequest=sendAllowanceRequest;window.manageRequestCategories=manageRequestCategories;window.addRequestCategory=addRequestCategory;window.updateRequestCategory=updateRequestCategory;window.removeRequestCategory=removeRequestCategory;window.loanRequest=loanRequest;window.sendLoan=sendLoan;window.goalAdd=goalAdd;window.saveGoal=saveGoal;window.loadGoals=loadGoals;window.closeModal=closeModal;window.openModal=openModal;window.logout=logout;$('loginBtn').onclick=login;$('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});sb.auth.getSession().then(async({data})=>{if(data.session){user=data.session.user;await boot()}}).catch(e=>message('앱 초기화 오류: '+e.message));
 })().catch(e=>{const m=document.getElementById('loginMsg');if(m){m.textContent='앱 연결 오류: '+e.message;m.className='status error'}});
 </script>
 <script>
