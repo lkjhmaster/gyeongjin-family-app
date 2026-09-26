@@ -297,7 +297,13 @@ function cleanExpenseMemo(x){
   return m.trim()||'사용 기록';
 }
 function cleanDisplayText(v){
-  return String(v||'').replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]\s*/g,'').trim();
+  let m=String(v||'');
+  const childAllowance=m.match(/\[\[CHILD_ALLOWANCE:[^:]+::([^\]]+)\]\]/);
+  if(childAllowance?.[1])return childAllowance[1].trim();
+  m=m.replace(/\[\[CHILD_ALLOWANCE_APPLIED:[^\]]+\]\]\s*/g,'');
+  m=m.replace(/\[\[ALLOWANCE_KIND:(?:자유용돈|카드)\]\]\s*/g,'');
+  m=m.replace(/\[\[[A-Z_]+(?::[^\]]*)?\]\]\s*/g,'');
+  return m.trim();
 }
 async function childExpenseForm(){openModal(`<h2>📝 용돈 내역 입력</h2><label>구분</label><select id="cxType" onchange="childEntryTypeChanged()"><option value="expense">지출</option><option value="income">수입</option></select><div id="cxKindBox"><label>용돈 유형</label><select id="cxKind"><option value="자유용돈">자유용돈</option><option value="카드">카드</option></select></div><div id="cxCategoryBox"><label>지출 카테고리</label><select id="cxCategory"><option>식비</option><option>교통</option><option>쇼핑</option><option>생활</option><option>문화</option><option>의료</option><option>교육</option><option>기타</option></select></div><label>사용/입금 날짜</label><input id="cxDate" type="date" value="${new Date().toISOString().slice(0,10)}"><label>내용</label><input id="cxMemo" maxlength="120" placeholder="예: 점심 / 용돈 받음"><label>금액</label><input id="cxAmount" type="number" min="1" required><button class="primary" onclick="saveChildExpense()">저장</button><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);childEntryTypeChanged()}
 function childEntryTypeChanged(){const income=$('cxType')?.value==='income';$('cxKindBox')?.classList.remove('hidden');$('cxCategoryBox')?.classList.toggle('hidden',income)}
