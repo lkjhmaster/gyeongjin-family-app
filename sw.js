@@ -1,4 +1,4 @@
-const CACHE_NAME='gyeongjin-family-app-v2026.09.26-pin-task-fix-v2';
+const CACHE_NAME='gyeongjin-family-app-v2026.09.26-weekly-task-plan-v1';
 const APP_SHELL=['./','./index.html','./manifest.json','./icon-192.jpg','./icon-512.jpg','./icon-192.png','./icon-512.png','./sw.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
