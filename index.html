@@ -126,12 +126,13 @@ async function fetchTodayTasks(childId){
   const {data:tasks,error}=await sb.from('allowance_tasks').select('*').eq('child_id',childId).eq('active',true).order('created_at');
   if(error)return {data:[],error};
   const {data:reqs}=await sb.from('allowance_requests').select('id,amount,status,reason,created_at').eq('child_id',childId).eq('status','pending');
-  const {data:completions}=await sb.from('allowance_task_completions').select('task_id,task_date').eq('child_id',childId).eq('task_date',date);
+  const {data:completions}=await sb.from('allowance_task_completions').select('id,task_id,task_date,approval_status').eq('child_id',childId).eq('task_date',date);
   const rows=(tasks||[]).filter(t=>!String(t.title||'').startsWith('[[TASK_LOG:')&&(!t.scheduled_date||String(t.scheduled_date)===date)).map(t=>{
-    const pending=(reqs||[]).find(r=>String(r.reason||'').includes('[[TASK_APPROVAL:'+t.id+':'+date+':'));
-    return {...t,completed:(completions||[]).some(x=>String(x.task_id)===String(t.id)),approvalStatus:pending?.status||null,approvalRequestId:pending?.id||null};
+    const completion=(completions||[]).find(x=>String(x.task_id)===String(t.id));
+    const pendingLegacy=(reqs||[]).find(r=>String(r.reason||'').includes('[[TASK_APPROVAL:'+t.id+':'+date+':'));
+    const approvalStatus=completion?.approval_status||pendingLegacy?.status||null;
+    return {...t,completed:!!completion||false,approvalStatus,approvalRequestId:pendingLegacy?.id||null,completionId:completion?.id||null};
   });
-  // 기존 로그 방식도 읽어 호환성을 유지합니다.
   const {data:logs}=await sb.from('allowance_tasks').select('title,completed_date').eq('child_id',childId).eq('active',false).eq('completed_date',date).ilike('title','[[TASK_LOG:%');
   const done=new Set((logs||[]).map(x=>{const v=String(x.title||'');return v.startsWith('[[TASK_LOG:')?v.slice(11,-2):''}).filter(Boolean));
   rows.forEach(r=>{if(done.has(String(r.id)))r.completed=true;});
@@ -180,16 +181,20 @@ async function processOverdueTaskPenalties(childId){
   window.__taskPenaltyLocks=window.__taskPenaltyLocks||new Set();if(window.__taskPenaltyLocks.has(lockKey))return;window.__taskPenaltyLocks.add(lockKey);
   try{
     const {data:tasks}=await sb.from('allowance_tasks').select('*').eq('child_id',childId).eq('active',true);
+    const {data:completions}=await sb.from('allowance_task_completions').select('task_id').eq('child_id',childId).eq('task_date',prev);
+    const completedIds=new Set((completions||[]).map(x=>String(x.task_id)));
     const {data:logs}=await sb.from('allowance_tasks').select('title,completed_date').eq('child_id',childId).eq('active',false).eq('completed_date',prev).ilike('title','[[TASK_LOG:%');
-    const completedIds=new Set((logs||[]).map(x=>{const v=String(x.title||'');return v.startsWith('[[TASK_LOG:')?v.slice(11,-2):''}).filter(Boolean));
-    const {data:existing}=await sb.from('allowance_requests').select('reason,status').eq('child_id',childId).ilike('reason','%[[TASK_APPROVAL:%');
+    (logs||[]).forEach(x=>{const v=String(x.title||'');if(v.startsWith('[[TASK_LOG:'))completedIds.add(v.slice(11,-2));});
+    const {data:existing}=await sb.from('allowance_task_penalties').select('task_id,task_date,status').eq('child_id',childId).eq('task_date',prev);
     for(const task of (tasks||[])){
-      const reward=Number(task.reward_amount||0);if(!(reward<0)||String(task.title||'').startsWith('[[TASK_LOG:'))continue;
+      if(String(task.title||'').startsWith('[[TASK_LOG:'))continue;
+      const amount=Number(task.noncompletion_enabled?task.noncompletion_amount:(Number(task.reward_amount||0)<0?task.reward_amount:0));
+      if(!amount||completedIds.has(String(task.id)))continue;
       const scheduledDate=task.scheduled_date?String(task.scheduled_date):prev;if(scheduledDate!==prev)continue;
-      const createdDate=task.created_at?String(task.created_at).slice(0,10):prev;if(createdDate>prev||completedIds.has(String(task.id)))continue;
-      const marker='[[TASK_APPROVAL:'+task.id+':'+prev+':missed]]';if((existing||[]).some(x=>String(x.reason||'').includes(marker)))continue;
-      const reason='[[REQUEST_CATEGORY:오늘의 할 일 미이행]]'+marker+' '+String(task.title||'오늘의 할 일');
-      const {error}=await sb.from('allowance_requests').insert({child_id:childId,amount:Math.abs(reward),reason,requested_by:user.id});if(error)console.warn('오늘의 할 일 미이행 승인요청 생성 실패',error.message);
+      const createdDate=task.created_at?String(task.created_at).slice(0,10):prev;if(createdDate>prev)continue;
+      if((existing||[]).some(x=>String(x.task_id)===String(task.id)&&String(x.task_date)===prev))continue;
+      const {error}=await sb.from('allowance_task_penalties').insert({task_id:task.id,child_id:childId,task_date:prev,amount:Math.abs(amount),status:'pending',created_by:user.id});
+      if(error)console.warn('오늘의 할 일 미이행 승인요청 생성 실패',error.message);
     }
   }finally{window.__taskPenaltyLocks.delete(lockKey)}
 }
@@ -206,25 +211,17 @@ async function toggleTodayTask(id,completed){
   const date=localToday();
   const {data:task,error:taskError}=await sb.from('allowance_tasks').select('*').eq('id',id).eq('child_id',child.id).single();
   if(taskError||!task)return alert('할 일을 찾지 못했습니다.');
-  const {data:pending}=await sb.from('allowance_requests').select('id,status').eq('child_id',child.id).eq('status','pending').ilike('reason','%[[TASK_APPROVAL:'+id+':'+date+':%').limit(1);
-  if((pending||[]).length)return alert('이미 부모 승인 대기 중입니다.');
-  const {data:existing,error:existingError}=await sb.from('allowance_task_completions').select('id').eq('task_id',id).eq('child_id',child.id).eq('task_date',date).limit(1);
+  const {data:existing,error:existingError}=await sb.from('allowance_task_completions').select('id,approval_status').eq('task_id',id).eq('child_id',child.id).eq('task_date',date).limit(1);
   if(existingError)return alert('완료 상태를 확인하지 못했습니다: '+existingError.message);
   if(completed){
-    if(!(existing||[]).length){
-      const {error:completeError}=await sb.from('allowance_task_completions').insert({task_id:id,child_id:child.id,task_date:date,completed_by:user.id});
-      if(completeError)return alert('오늘의 할 일 체크 저장 실패: '+completeError.message);
-    }
-    const reward=Number(task.reward_amount||0);
-    if(reward>0){
-      const marker='[[TASK_APPROVAL:'+id+':'+date+':completed]]';
-      const reason='[[REQUEST_CATEGORY:오늘의 할 일 완료]]'+marker+' '+String(task.title||'오늘의 할 일');
-      const {error:reqError}=await sb.from('allowance_requests').insert({child_id:child.id,amount:reward,reason,requested_by:user.id});
-      if(reqError)return alert('부모 승인요청 저장 실패: '+reqError.message);
-    }
+    if((existing||[]).length)return alert('이미 부모 승인 대기 또는 처리된 할 일입니다.');
+    const {error:completeError}=await sb.from('allowance_task_completions').insert({task_id:id,child_id:child.id,task_date:date,completed_by:user.id,approval_status:'pending'});
+    if(completeError)return alert('오늘의 할 일 체크 저장 실패: '+completeError.message);
   }else if(existing?.[0]?.id){
-    const {error:deleteError}=await sb.from('allowance_task_completions').delete().eq('id',existing[0].id);
-    if(deleteError)return alert('오늘의 할 일 체크 해제 실패: '+deleteError.message);
+    if(existing[0].approval_status==='pending'){
+      const {error:deleteError}=await sb.from('allowance_task_completions').delete().eq('id',existing[0].id);
+      if(deleteError)return alert('오늘의 할 일 체크 해제 실패: '+deleteError.message);
+    }else return alert('부모가 이미 확인한 할 일은 자녀가 해제할 수 없습니다.');
   }
   await renderTodayTasks(child.id,'todayTasksBox',true);
 }
@@ -242,7 +239,13 @@ function weeklyPlanDate(start,offset){const d=new Date(start+'T00:00:00');d.setD
 function weeklyPlanDayName(date){return ['일','월','화','수','목','금','토'][new Date(date+'T00:00:00').getDay()]}
 function weeklyPlanCapture(){
   const rows=window.__weeklyPlanRows||[];
-  rows.forEach(r=>{r.title=($('wpTitle_'+r.rid)?.value||'').trim();r.reward=Number($('wpReward_'+r.rid)?.value||0);});
+  rows.forEach(r=>{
+    r.title=($('wpTitle_'+r.rid)?.value||'').trim();
+    r.rewardEnabled=$('wpRewardEnabled_'+r.rid)?.value==='true';
+    r.reward=Number($('wpReward_'+r.rid)?.value||0);
+    r.penaltyEnabled=$('wpPenaltyEnabled_'+r.rid)?.value==='true';
+    r.penalty=Number($('wpPenalty_'+r.rid)?.value||0);
+  });
   return rows;
 }
 function weeklyPlanRender(){
@@ -252,7 +255,7 @@ function weeklyPlanRender(){
   for(let d=0;d<7;d++){
     const date=weeklyPlanDate(start,d),dayRows=rows.filter(r=>r.date===date);
     h+=`<div class="child-card"><div class="topline"><div><b>${weeklyPlanDayName(date)}요일</b><div class="mini">${date}</div></div><button class="secondary smallbtn" onclick="weeklyPlanAddRow('${date}')">➕ 할 일</button></div>`;
-    h+=dayRows.map(r=>`<div class="goal" style="display:grid;grid-template-columns:1fr 100px 42px;gap:7px;align-items:center"><input id="wpTitle_${r.rid}" maxlength="100" value="${esc(r.title||'')}" placeholder="할 일"><input id="wpReward_${r.rid}" type="number" step="1" value="${Number(r.reward||0)}" placeholder="보상"><button type="button" class="danger smallbtn" onclick="weeklyPlanRemoveRow('${r.rid}')">삭제</button></div>`).join('');
+    h+=dayRows.map(r=>`<div class="goal" style="display:grid;grid-template-columns:minmax(120px,1fr) 86px 86px 86px 86px 42px;gap:6px;align-items:center"><input id="wpTitle_${r.rid}" maxlength="100" value="${esc(r.title||'')}" placeholder="할 일"><select id="wpRewardEnabled_${r.rid}" onchange="weeklyPlanCapture();weeklyPlanRender()"><option value="false" ${r.rewardEnabled?'':'selected'}>없음</option><option value="true" ${r.rewardEnabled?'selected':''}>보상</option></select><input id="wpReward_${r.rid}" type="number" step="1" value="${Number(r.reward||0)}" placeholder="금액"><select id="wpPenaltyEnabled_${r.rid}" onchange="weeklyPlanCapture();weeklyPlanRender()"><option value="false" ${r.penaltyEnabled?'':'selected'}>미적용</option><option value="true" ${r.penaltyEnabled?'selected':''}>적용</option></select><input id="wpPenalty_${r.rid}" type="number" step="1" value="${Number(r.penalty||0)}" placeholder="금액"><button type="button" class="danger smallbtn" onclick="weeklyPlanRemoveRow('${r.rid}')">삭제</button></div>`).join('');
     if(!dayRows.length)h+=`<div class="empty" style="padding:12px">등록된 계획이 없습니다.</div>`;
     h+='</div>';
   }
@@ -265,12 +268,12 @@ async function loadWeeklyTaskPlan(){
   const end=weeklyPlanDate(start,6);
   const {data:scheduled,error}=await sb.from('allowance_tasks').select('*').eq('child_id',cid).eq('active',true).gte('scheduled_date',start).lte('scheduled_date',end).order('scheduled_date').order('created_at');
   if(error)return alert('주간 계획을 불러오지 못했습니다: '+error.message);
-  let rows=(scheduled||[]).map((x,i)=>({rid:'db_'+i+'_'+String(x.id).slice(0,8),id:x.id,date:String(x.scheduled_date),title:x.title,reward:Number(x.reward_amount||0)}));
+  let rows=(scheduled||[]).map((x,i)=>({rid:'db_'+i+'_'+String(x.id).slice(0,8),id:x.id,date:String(x.scheduled_date),title:x.title,reward:Number(x.completion_reward_amount??(Number(x.reward_amount||0)>0?x.reward_amount:0)),rewardEnabled:!!x.completion_reward_enabled||(Number(x.reward_amount||0)>0),penalty:Number(x.noncompletion_amount??(Number(x.reward_amount||0)<0?x.reward_amount:0)),penaltyEnabled:!!x.noncompletion_enabled||(Number(x.reward_amount||0)<0)}));
   window.__weeklyPlanOriginalIds=new Set((scheduled||[]).map(x=>String(x.id)));
   window.__weeklyPlanLegacyIds=new Set();
   if(!rows.length){
     const {data:legacy}=await sb.from('allowance_tasks').select('*').eq('child_id',cid).eq('active',true).is('scheduled_date',null).order('created_at');
-    rows=(legacy||[]).flatMap((x)=>Array.from({length:7},(_,d)=>({rid:'legacy_'+d+'_'+String(x.id).slice(0,8),date:weeklyPlanDate(start,d),title:x.title,reward:Number(x.reward_amount||0)})));
+    rows=(legacy||[]).flatMap((x)=>Array.from({length:7},(_,d)=>({rid:'legacy_'+d+'_'+String(x.id).slice(0,8),date:weeklyPlanDate(start,d),title:x.title,reward:Number(x.completion_reward_amount??(Number(x.reward_amount||0)>0?x.reward_amount:0)),rewardEnabled:!!x.completion_reward_enabled||(Number(x.reward_amount||0)>0),penalty:Number(x.noncompletion_amount??(Number(x.reward_amount||0)<0?x.reward_amount:0)),penaltyEnabled:!!x.noncompletion_enabled||(Number(x.reward_amount||0)<0)})));
     window.__weeklyPlanLegacyIds=new Set((legacy||[]).map(x=>String(x.id)));
   }
   window.__weeklyPlanRows=rows;
@@ -305,7 +308,8 @@ async function saveWeeklyPlan(){
     if(error)return alert('삭제할 계획 정리 실패: '+error.message);
   }
   for(const r of rows.filter(r=>r.id)){
-    const {error}=await sb.from('allowance_tasks').update({title:r.title,reward_amount:Number.isFinite(r.reward)?r.reward:0,scheduled_date:r.date,active:true,updated_by:user.id,updated_at:now}).eq('id',r.id);
+    const legacyReward=Number.isFinite(r.reward)&&r.rewardEnabled?r.reward:0;
+    const {error}=await sb.from('allowance_tasks').update({title:r.title,reward_amount:legacyReward,completion_reward_amount:r.rewardEnabled&&Number.isFinite(r.reward)?r.reward:0,completion_reward_enabled:!!r.rewardEnabled,noncompletion_amount:r.penaltyEnabled&&Number.isFinite(r.penalty)?r.penalty:0,noncompletion_enabled:!!r.penaltyEnabled,scheduled_date:r.date,active:true,updated_by:user.id,updated_at:now}).eq('id',r.id);
     if(error)return alert('주간 계획 수정 실패: '+error.message);
   }
   const legacyIds=[...(window.__weeklyPlanLegacyIds||[])];
@@ -313,7 +317,7 @@ async function saveWeeklyPlan(){
     const {error}=await sb.from('allowance_tasks').update({active:false,updated_by:user.id,updated_at:now}).in('id',legacyIds);
     if(error)return alert('기존 매일 할 일 전환 실패: '+error.message);
   }
-  const newRows=rows.filter(r=>!r.id).map(r=>({child_id:cid,title:r.title,reward_amount:Number.isFinite(r.reward)?r.reward:0,active:true,scheduled_date:r.date,completed_date:null,created_by:user.id,updated_by:user.id}));
+  const newRows=rows.filter(r=>!r.id).map(r=>({child_id:cid,title:r.title,reward_amount:r.rewardEnabled&&Number.isFinite(r.reward)?r.reward:0,completion_reward_amount:r.rewardEnabled&&Number.isFinite(r.reward)?r.reward:0,completion_reward_enabled:!!r.rewardEnabled,noncompletion_amount:r.penaltyEnabled&&Number.isFinite(r.penalty)?r.penalty:0,noncompletion_enabled:!!r.penaltyEnabled,active:true,scheduled_date:r.date,completed_date:null,created_by:user.id,updated_by:user.id}));
   if(newRows.length){
     const {error}=await sb.from('allowance_tasks').insert(newRows);
     if(error)return alert('1주 계획 저장 실패: '+error.message);
@@ -340,14 +344,65 @@ function parseTaskApprovalReason(reason){
   const parts=raw.slice(start,end).split(':');if(parts.length<3)return null;return {outcome,taskId:parts[0],date:parts[1],title:raw.slice(end+2).trim()};
 }
 async function loadAllowancePending(){
-  const [{data:a},{data:l},{data:e}]=await Promise.all([sb.from('allowance_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),sb.from('loan_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),sb.from('allowance_entry_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false})]);
-  const arr=[...(a||[]).map(x=>({k:'용돈',x})),...(l||[]).map(x=>({k:x.request_type==='borrow'?'빌리기':'갚기',x})),...(e||[]).map(x=>({k:'내역입력',x}))].sort((x,y)=>childRank(x.x.allowance_children?.name)-childRank(y.x.allowance_children?.name));
+  const [{data:a},{data:l},{data:e},{data:tc},{data:tp}]=await Promise.all([
+    sb.from('allowance_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),
+    sb.from('loan_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),
+    sb.from('allowance_entry_requests').select('*,allowance_children(name)').eq('status','pending').order('created_at',{ascending:false}),
+    sb.from('allowance_task_completions').select('id,task_id,child_id,task_date,completed_at,allowance_children(name),allowance_tasks(title,completion_reward_amount,completion_reward_enabled,reward_amount)').eq('approval_status','pending').order('task_date',{ascending:false}),
+    sb.from('allowance_task_penalties').select('id,task_id,child_id,task_date,amount,created_at,allowance_children(name),allowance_tasks(title,noncompletion_amount,noncompletion_enabled,reward_amount)').eq('status','pending').order('task_date',{ascending:false})
+  ]);
+  const taskLegacy=(a||[]).filter(x=>String(x.reason||'').includes('[[TASK_APPROVAL:'));
+  const normalAllowance=(a||[]).filter(x=>!String(x.reason||'').includes('[[TASK_APPROVAL:'));
+  const arr=[
+    ...(tc||[]).map(x=>({k:'할일완료',x})),
+    ...(tp||[]).map(x=>({k:'할일미이행',x})),
+    ...(normalAllowance||[]).map(x=>({k:'용돈',x})),
+    ...(taskLegacy||[]).map(x=>({k:'용돈',x})),
+    ...(l||[]).map(x=>({k:x.request_type==='borrow'?'빌리기':'갚기',x})),
+    ...(e||[]).map(x=>({k:'내역입력',x}))
+  ].sort((x,y)=>childRank(x.x.allowance_children?.name)-childRank(y.x.allowance_children?.name));
   $('allowPending').innerHTML=arr.length?arr.map(o=>{
     if(o.k==='내역입력'){const q=o.x;return '<div class="child-card"><b>'+esc(q.allowance_children?.name)+' · 수입/지출 입력</b><div>'+(q.type==='income'?'수입':'지출')+' · '+esc(q.category)+' · '+money(q.amount)+'</div><div class="mini">자금 출처: '+esc(q.source)+' · '+q.date+'</div><div>'+esc(q.memo||'내역')+'</div><div class="row"><button class="primary smallbtn" onclick="decideEntryRequest(\''+q.id+'\',true)">승인</button><button class="danger smallbtn" onclick="decideEntryRequest(\''+q.id+'\',false)">거절</button></div></div>'}
-    const p=o.k==='용돈'?parseAllowanceReason(o.x.reason):{category:'',memo:o.x.reason||''},task=parseTaskApprovalReason(o.x.reason);
-    if(task){const sign=task.outcome==='completed'?'+':'−',kind=task.outcome==='completed'?'자유용돈':'카드';return '<div class="child-card"><b>'+esc(o.x.allowance_children?.name)+' · 오늘의 할 일</b><div><b>'+esc(task.title||'할 일')+'</b></div><div class="mini">'+task.date+' · '+(task.outcome==='completed'?'체크 완료':'미이행')+' · 기본 보상 '+sign+money(Math.abs(Number(o.x.amount||0)))+'</div><div class="row" style="margin-top:8px"><label style="flex:1">반영 금액<input id="taskAmt_'+o.x.id+'" type="number" min="0" value="'+Math.abs(Number(o.x.amount||0))+'"></label><label style="flex:1">용돈 유형<select id="taskKind_'+o.x.id+'"><option value="자유용돈" '+(kind==='자유용돈'?'selected':'')+'>자유용돈</option><option value="카드" '+(kind==='카드'?'selected':'')+'>카드</option></select></label></div><div class="row"><button class="primary smallbtn" onclick="decideTaskApproval(\''+o.x.id+'\',true)">승인</button><button class="danger smallbtn" onclick="decideTaskApproval(\''+o.x.id+'\',false)">거절</button></div></div>'}
+    if(o.k==='할일완료'){const q=o.x,t=q.allowance_tasks||{},amt=Number(t.completion_reward_enabled?t.completion_reward_amount:(Number(t.reward_amount||0)>0?t.reward_amount:0));return '<div class="child-card"><b>'+esc(q.allowance_children?.name)+' · 오늘의 할 일</b><div><b>'+esc(t.title||'할 일')+'</b></div><div class="mini">'+q.task_date+' · 이행 · '+(amt?('적용 금액 '+(amt>0?'+':'−')+money(Math.abs(amt))):'금액 적용 없음 · 부모 확인 필요')+' · 자유용돈</div><div class="row"><button class="primary smallbtn" onclick="decideTaskCompletionApproval(\''+q.id+'\',true)">승인</button><button class="danger smallbtn" onclick="decideTaskCompletionApproval(\''+q.id+'\',false)">거절</button></div></div>'}
+    if(o.k==='할일미이행'){const q=o.x,t=q.allowance_tasks||{},amt=Number(t.noncompletion_enabled?t.noncompletion_amount:(Number(t.reward_amount||0)<0?t.reward_amount:-Math.abs(Number(q.amount||0))));return '<div class="child-card"><b>'+esc(q.allowance_children?.name)+' · 오늘의 할 일</b><div><b>'+esc(t.title||'할 일')+'</b></div><div class="mini">'+q.task_date+' · 미이행 · 적용 금액 '+(amt>0?'+':'−')+money(Math.abs(amt))+' · 자유용돈</div><div class="row"><button class="primary smallbtn" onclick="decideTaskPenaltyApproval(\''+q.id+'\',true)">승인</button><button class="danger smallbtn" onclick="decideTaskPenaltyApproval(\''+q.id+'\',false)">거절</button></div></div>'}
+    const p=o.k==='용돈'?parseAllowanceReason(o.x.reason):{category:'',memo:o.x.reason||''};
     return '<div class="child-card"><b>'+esc(o.x.allowance_children?.name)+' · '+o.k+(p.category?' · 🎁 '+esc(p.category):'')+'</b><div>'+money(o.x.amount)+(p.memo?' · '+esc(allowanceRequestDisplay(p.memo)):'')+'</div><div class="row"><button class="primary smallbtn" onclick="decide(\''+(o.k==='용돈'?'용돈':'대출')+'\',\''+o.x.id+'\',true)">승인</button><button class="danger smallbtn" onclick="decide(\''+(o.k==='용돈'?'용돈':'대출')+'\',\''+o.x.id+'\',false)">거절</button></div></div>';
   }).join(''):'<div class="empty">승인 대기 없음 🌱</div>';
+}
+async function decideTaskCompletionApproval(id,ok){
+  if(!parent())return;
+  const {data:row,error}=await sb.from('allowance_task_completions').select('*,allowance_tasks(title,completion_reward_amount,completion_reward_enabled,reward_amount)').eq('id',id).single();
+  if(error||!row)return alert('이행 승인 항목을 불러오지 못했습니다: '+(error?.message||''));
+  if(row.approval_status!=='pending')return alert('이미 처리된 항목입니다.');
+  const task=row.allowance_tasks||{};
+  const amount=Number(task.completion_reward_enabled?task.completion_reward_amount:(Number(task.reward_amount||0)>0?task.reward_amount:0));
+  if(ok&&amount!==0){
+    const type=amount>0?'income':'expense',abs=Math.abs(amount);
+    const {error:insError}=await sb.from('allowance_entries').insert({child_id:row.child_id,type,category:'오늘의 할 일',memo:'[[ALLOWANCE_KIND:자유용돈]] 오늘의 할 일 · '+String(task.title||'할 일'),amount:abs,date:row.task_date,entered_by:user.id,source:'request_approved',fund_source:'자유용돈'});
+    if(insError)return alert('자유용돈 반영 실패: '+insError.message);
+  }
+  const {error:updateError}=await sb.from('allowance_task_completions').update({approval_status:ok?'approved':'rejected',approved_by:user.id,approved_at:new Date().toISOString()}).eq('id',id).eq('approval_status','pending');
+  if(updateError)return alert('오늘의 할 일 승인 상태 저장 실패: '+updateError.message);
+  loadAllowancePending();
+}
+async function decideTaskPenaltyApproval(id,ok){
+  if(!parent())return;
+  const {data:row,error}=await sb.from('allowance_task_penalties').select('*,allowance_tasks(title,noncompletion_amount,noncompletion_enabled,reward_amount)').eq('id',id).single();
+  if(error||!row)return alert('미이행 승인 항목을 불러오지 못했습니다: '+(error?.message||''));
+  if(row.status!=='pending')return alert('이미 처리된 항목입니다.');
+  const task=row.allowance_tasks||{};
+  const amount=Number(task.noncompletion_enabled?task.noncompletion_amount:(Number(task.reward_amount||0)<0?task.reward_amount:-Math.abs(Number(row.amount||0))));
+  if(ok&&amount!==0){
+    const type=amount>0?'income':'expense',abs=Math.abs(amount);
+    const {data:entry,error:insError}=await sb.from('allowance_entries').insert({child_id:row.child_id,type,category:'오늘의 할 일',memo:'[[ALLOWANCE_KIND:자유용돈]] 오늘의 할 일 미이행 · '+String(task.title||'할 일'),amount:abs,date:row.task_date,entered_by:user.id,source:'request_approved',fund_source:'자유용돈'}).select('id').maybeSingle();
+    if(insError)return alert('자유용돈 감액 반영 실패: '+insError.message);
+    const {error:updateError}=await sb.from('allowance_task_penalties').update({status:'approved',approved_by:user.id,approved_at:new Date().toISOString(),entry_id:entry?.id||null}).eq('id',id).eq('status','pending');
+    if(updateError)return alert('미이행 승인 상태 저장 실패: '+updateError.message);
+  }else{
+    const {error:updateError}=await sb.from('allowance_task_penalties').update({status:'rejected',approved_by:user.id,approved_at:new Date().toISOString()}).eq('id',id).eq('status','pending');
+    if(updateError)return alert('미이행 거절 처리 실패: '+updateError.message);
+  }
+  loadAllowancePending();
 }
 async function decideTaskApproval(id,ok){
   if(!parent())return;const {data:req,error}=await sb.from('allowance_requests').select('*').eq('id',id).single();if(error)return alert('승인 요청을 불러오지 못했습니다: '+error.message);
@@ -419,7 +474,7 @@ async function startChildPhotoSlideshow(childId,photoEl){
   if(window.__childPhotoTimer){clearInterval(window.__childPhotoTimer);window.__childPhotoTimer=null;}if(!photoEl)return;
   try{const rows=await loadChildPhotos(childId),photos=rows.map(x=>x.image_url).filter(Boolean);if(!photos.length)return;let index=0;const apply=()=>{if(photoEl.isConnected)photoEl.style.backgroundImage='url("'+String(photos[index]).replace(/"/g,'&quot;')+'")';};apply();if(photos.length>1)window.__childPhotoTimer=setInterval(()=>{index=(index+1)%photos.length;photoEl.style.transition='opacity .45s ease';photoEl.style.opacity='.25';setTimeout(()=>{if(photoEl.isConnected){apply();photoEl.style.opacity='1';}},220);},5000);}catch(e){console.warn('사진첩 슬라이드 로드 실패',e);}
 }
-async function childDetail(id){const [{data:c},{data:e},{data:g}]=await Promise.all([sb.from('allowance_children').select('*').eq('id',id).single(),sb.from('allowance_entries').select('*').eq('child_id',id).order('date',{ascending:false}),sb.from('allowance_goals').select('*').eq('child_id',id).eq('active',true)]);const i=(e||[]).filter(x=>x.type==='income').reduce((a,x)=>a+Number(x.amount),0),o=(e||[]).filter(x=>x.type==='expense').reduce((a,x)=>a+Number(x.amount),0),freeIncome=(e||[]).filter(x=>x.type==='income'&&incomeKind(x)==='자유용돈').reduce((a,x)=>a+Number(x.amount),0),cardIncome=(e||[]).filter(x=>x.type==='income'&&incomeKind(x)==='카드').reduce((a,x)=>a+Number(x.amount),0),freeExpense=(e||[]).filter(x=>x.type==='expense'&&expenseAllowanceKind(x)==='자유용돈').reduce((a,x)=>a+Number(x.amount),0),cardExpense=(e||[]).filter(x=>x.type==='expense'&&expenseAllowanceKind(x)==='카드').reduce((a,x)=>a+Number(x.amount),0),free=freeIncome-freeExpense,card=cardIncome-cardExpense;const actors=await allowanceAuditActors(e||[]);const [{data:lt},{data:loanLimitRow}]=await Promise.all([sb.from('loan_transactions').select('*').eq('child_id',id),sb.from('child_loans').select('credit_limit').eq('child_id',id).maybeSingle()]);const debt=Math.max(0,(lt||[]).reduce((a,x)=>a+(x.transaction_type==='borrow'?1:-1)*Number(x.amount),0));const loanLimit=Number(loanLimitRow?.credit_limit||0);const loanRemain=Math.max(0,loanLimit-debt);const loanRecent=(lt||[]).map(x=>({id:'loan-'+x.id,date:String(x.created_at||'').slice(0,10),category:'마이너스통장',memo:'마이너스 통장 '+(x.transaction_type==='borrow'?'빌림':'상환')+(x.reason?' · '+x.reason:''),type:x.transaction_type==='borrow'?'income':'expense',amount:Number(x.amount)||0,loanTx:true,created_at:x.created_at}));const recent=[...(e||[]),...loanRecent].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.created_at||'').localeCompare(String(a.created_at||'')));$('main').className='';$('main').style.backgroundImage='';$('main').innerHTML=shell(`🎒 ${esc(c.name)}`,`<section class="card"><div class="topline"><h2 style="margin:0">용돈 현황</h2><div class="row" style="justify-content:flex-end"><button class="secondary smallbtn" onclick="manageRequestCategories()">⚙️ 요청 항목 설정</button><button class="secondary smallbtn" onclick="parentEntryForm('${id}')">➕ 부모 직접 입력</button></div></div><div class="income-split"><div class="income-kind" style="cursor:pointer" onclick="openAllowanceKindHistory('${id}','자유용돈')"><span>자유용돈 잔액</span><b>${money(free)}</b><div class="mini">터치하여 내역 보기</div></div><div class="income-kind card-kind" style="cursor:pointer" onclick="openAllowanceKindHistory('${id}','카드')"><span>카드 잔액</span><b>${money(card)}</b><div class="mini">터치하여 내역 보기</div></div></div></section><section class="card"><h2>💳 마이너스 통장</h2><div class="loanbox" style="cursor:pointer" onclick="openAllowanceKindHistory('${id}','마이너스통장')"><div class="mini">💳 사용 가능 금액 · 터치하여 거래 내역 보기</div><div class="loanbig">${money(loanRemain)}</div><div class="note">대출 한도 ${money(loanLimit)} · 현재 빌린 금액 ${money(debt)}</div></div></section><section class="card"><h2>🎯 저축 목표</h2>${(g||[]).map(x=>`<div class="goal"><b>${esc(x.title)}</b><div class="mini">${money(x.saved_amount)} / ${money(x.target_amount)}</div><div class="progress"><i style="width:${Math.min(100,Number(x.saved_amount)/Number(x.target_amount)*100)}%"></i></div></div>`).join('')||'<div class="empty">등록된 목표가 없습니다.</div>'}</section><section class="card"><h2>📒 최근 내역</h2>${recent.slice(0,30).map(x=>`<div class="item"><div class="icon">${icons[x.category]||'🧾'}</div><div><div class="memo">${esc(cleanExpenseMemo(x))}${x.loanTx?'':incomeKindBadge(x)}</div><div class="meta">${x.date} · ${esc(x.category)}</div>${x.loanTx?'<div class="meta">마이너스 통장 거래</div>':allowanceActorMeta(actors[x.id])}</div><div class="amt ${x.type}">${x.type==='income'?'+':'−'}${money(x.amount)}</div><span></span></div>`).join('')||'<div class="empty">내역이 없습니다.</div>'}</section>`)}
+async function childDetail(id){const [{data:c},{data:e},{data:g}]=await Promise.all([sb.from('allowance_children').select('*').eq('id',id).single(),sb.from('allowance_entries').select('*').eq('child_id',id).order('date',{ascending:false}),sb.from('allowance_goals').select('*').eq('child_id',id).eq('active',true)]);const i=(e||[]).filter(x=>x.type==='income').reduce((a,x)=>a+Number(x.amount),0),o=(e||[]).filter(x=>x.type==='expense').reduce((a,x)=>a+Number(x.amount),0),freeIncome=(e||[]).filter(x=>x.type==='income'&&incomeKind(x)==='자유용돈').reduce((a,x)=>a+Number(x.amount),0),cardIncome=(e||[]).filter(x=>x.type==='income'&&incomeKind(x)==='카드').reduce((a,x)=>a+Number(x.amount),0),freeExpense=(e||[]).filter(x=>x.type==='expense'&&expenseAllowanceKind(x)==='자유용돈').reduce((a,x)=>a+Number(x.amount),0),cardExpense=(e||[]).filter(x=>x.type==='expense'&&expenseAllowanceKind(x)==='카드').reduce((a,x)=>a+Number(x.amount),0),free=freeIncome-freeExpense,card=cardIncome-cardExpense;const actors=await allowanceAuditActors(e||[]);const [{data:lt},{data:loanLimitRow}]=await Promise.all([sb.from('loan_transactions').select('*').eq('child_id',id),sb.from('child_loans').select('credit_limit').eq('child_id',id).maybeSingle()]);const debt=Math.max(0,(lt||[]).reduce((a,x)=>a+(x.transaction_type==='borrow'?1:-1)*Number(x.amount),0));const loanLimit=Number(loanLimitRow?.credit_limit||0);const loanRemain=Math.max(0,loanLimit-debt);const loanRecent=(lt||[]).map(x=>({id:'loan-'+x.id,date:String(x.created_at||'').slice(0,10),category:'마이너스통장',memo:'마이너스 통장 '+(x.transaction_type==='borrow'?'빌림':'상환')+(x.reason?' · '+x.reason:''),type:x.transaction_type==='borrow'?'income':'expense',amount:Number(x.amount)||0,loanTx:true,created_at:x.created_at}));const recent=[...(e||[]),...loanRecent].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.created_at||'').localeCompare(String(a.created_at||'')));$('main').className='';$('main').style.backgroundImage='';$('main').innerHTML=shell(`🎒 ${esc(c.name)}`,`<section class="child-photo" style="margin-bottom:12px"><div id="parentChildPhotoImage" class="child-photo-image" aria-label="자녀 사진"></div></section><section class="child-header" style="margin-top:0"><div class="child-title">${esc(c.name)}</div><div class="child-toolbar"><button class="secondary smallbtn" onclick="manageChildPhotos('${id}')">📷 사진첩</button><button class="logout" onclick="childDetail('${id}')">새로고침</button></div></section><section class="card"><div class="topline"><h2 style="margin:0">용돈 현황</h2><div class="row" style="justify-content:flex-end"><button class="secondary smallbtn" onclick="manageRequestCategories()">⚙️ 요청 항목 설정</button><button class="secondary smallbtn" onclick="parentEntryForm('${id}')">➕ 부모 직접 입력</button></div></div><div class="income-split"><div class="income-kind" style="cursor:pointer" onclick="openAllowanceKindHistory('${id}','자유용돈')"><span>자유용돈 잔액</span><b>${money(free)}</b><div class="mini">터치하여 내역 보기</div></div><div class="income-kind card-kind" style="cursor:pointer" onclick="openAllowanceKindHistory('${id}','카드')"><span>카드 잔액</span><b>${money(card)}</b><div class="mini">터치하여 내역 보기</div></div></div></section><section class="card"><h2>💳 마이너스 통장</h2><div class="loanbox" style="cursor:pointer" onclick="openAllowanceKindHistory('${id}','마이너스통장')"><div class="mini">💳 사용 가능 금액 · 터치하여 거래 내역 보기</div><div class="loanbig">${money(loanRemain)}</div><div class="note">대출 한도 ${money(loanLimit)} · 현재 빌린 금액 ${money(debt)}</div></div></section><section class="card"><h2>🎯 저축 목표</h2>${(g||[]).map(x=>`<div class="goal"><b>${esc(x.title)}</b><div class="mini">${money(x.saved_amount)} / ${money(x.target_amount)}</div><div class="progress"><i style="width:${Math.min(100,Number(x.saved_amount)/Number(x.target_amount)*100)}%"></i></div></div>`).join('')||'<div class="empty">등록된 목표가 없습니다.</div>'}</section><section class="card"><h2>📒 최근 내역</h2>${recent.slice(0,30).map(x=>`<div class="item"><div class="icon">${icons[x.category]||'🧾'}</div><div><div class="memo">${esc(cleanExpenseMemo(x))}${x.loanTx?'':incomeKindBadge(x)}</div><div class="meta">${x.date} · ${esc(x.category)}</div>${x.loanTx?'<div class="meta">마이너스 통장 거래</div>':allowanceActorMeta(actors[x.id])}</div><div class="amt ${x.type}">${x.type==='income'?'+':'−'}${money(x.amount)}</div><span></span></div>`).join('')||'<div class="empty">내역이 없습니다.</div>'}</section>`);startChildPhotoSlideshow(id,$('parentChildPhotoImage'))}
 async function parentEntryForm(id){const {data:c}=await sb.from('allowance_children').select('name').eq('id',id).single();openModal(`<h2>➕ ${esc(c?.name||'자녀')} 내역 직접 입력</h2><label>날짜</label><input id="peDate" type="date" value="${new Date().toISOString().slice(0,10)}"><label>구분</label><select id="peType" onchange="parentEntryTypeChanged()"><option value="income">수입</option><option value="expense">지출</option></select><div id="peKindBox"><label>용돈 유형</label><select id="peKind"><option value="자유용돈">자유용돈</option><option value="카드">카드</option></select></div><div id="peExpenseBox"><label>지출 카테고리</label><select id="peCategory"><option>식비</option><option>교통</option><option>쇼핑</option><option>생활</option><option>문화</option><option>의료</option><option>교육</option><option>기타</option></select></div><label>내용</label><input id="peMemo" required placeholder="예: 9월 자유용돈 / 점심"><label>금액</label><input id="peAmount" type="number" min="1" required><button class="primary" onclick="saveParentEntry('${id}')">저장</button><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);parentEntryTypeChanged()}
 function parentEntryTypeChanged(){const income=$('peType')?.value==='income';$('peKindBox')?.classList.remove('hidden');$('peExpenseBox')?.classList.toggle('hidden',income)}
 async function saveParentEntry(id){const type=$('peType').value,kind=$('peKind')?.value||'자유용돈',category=type==='income'?kind:$('peCategory').value,amount=Number($('peAmount').value),memo=$('peMemo').value.trim()||'내역';if(!amount||amount<1)return alert('금액을 입력해주세요.');const payload={child_id:id,type,category,memo,amount,date:$('peDate').value,entered_by:user.id};let r=await sb.from('allowance_entries').insert({...payload,allowance_type:kind});if(r.error&&/allowance_type/i.test(r.error.message||''))r=await sb.from('allowance_entries').insert({...payload,memo:`[[ALLOWANCE_KIND:${kind}]] ${memo}`});if(r.error)alert('내역 저장 실패: '+r.error.message);else{alert('내역을 저장했습니다.');closeModal();childDetail(id)}}
