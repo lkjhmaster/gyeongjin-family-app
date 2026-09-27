@@ -380,7 +380,11 @@ async function manageChildPhotos(childId){
   if(error)return alert('사진첩을 불러오지 못했습니다: '+error.message);
   const rows=photos||[];
   const list=rows.map((p,i)=>'<div class="item" style="align-items:center"><img src="'+esc(p.image_url)+'" style="width:76px;height:56px;object-fit:cover;border-radius:10px;border:1px solid #eee"><div style="flex:1"><b>'+(i+1)+'번째 사진</b><div class="mini">슬라이드 순서 '+(i+1)+'</div></div><button class="danger smallbtn" onclick="deleteChildPhoto(&quot;'+p.id+'&quot;,&quot;'+childId+'&quot;)">삭제</button></div>').join('');
-  openModal('<h2>📷 '+esc(c.name)+' 사진첩</h2><div class="note">최대 10장 · 자녀 화면에서 3초마다 자동 슬라이드됩니다.</div><input id="childPhotoFiles" type="file" accept="image/*" multiple onchange="previewChildPhotoCount()"><div id="childPhotoCount" class="mini" style="margin-top:6px">사진을 선택해주세요.</div><button class="primary" style="margin-top:10px" onclick="addChildPhotos(&quot;'+childId+'&quot;,'+rows.length+')">선택한 사진 추가</button><div style="margin-top:12px">'+(list||'<div class="empty">등록된 사진이 없습니다.</div>')+'</div><button class="secondary" style="margin-top:10px" onclick="closeModal()">닫기</button>');
+  openModal('<h2>📷 '+esc(c.name)+' 사진첩</h2><div class="note">최대 10장 · 자녀 화면에서 3초마다 자동 슬라이드됩니다.</div><input id="childPhotoFiles" type="file" accept="image/*" multiple><div id="childPhotoCount" class="mini" style="margin-top:6px">사진을 선택해주세요.</div><button id="childPhotoAddBtn" type="button" class="primary" style="margin-top:10px">선택한 사진 추가</button><div style="margin-top:12px">'+(list||'<div class="empty">등록된 사진이 없습니다.</div>')+'</div><button id="childPhotoCloseBtn" type="button" class="secondary" style="margin-top:10px">닫기</button>');
+  const photoInput=$('childPhotoFiles'),photoAddBtn=$('childPhotoAddBtn'),photoCloseBtn=$('childPhotoCloseBtn');
+  if(photoInput)photoInput.addEventListener('change',previewChildPhotoCount);
+  if(photoAddBtn)photoAddBtn.addEventListener('click',()=>addChildPhotos(childId,rows.length));
+  if(photoCloseBtn)photoCloseBtn.addEventListener('click',closeModal);
 }
 function previewChildPhotoCount(){const n=$('childPhotoFiles')?.files?.length||0;if($('childPhotoCount'))$('childPhotoCount').textContent=n?('선택 '+n+'장 · 현재 사진과 합쳐 최대 10장까지 가능합니다.'):'사진을 선택해주세요.';}
 async function addChildPhotos(childId,currentCount){
