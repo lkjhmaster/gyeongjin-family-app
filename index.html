@@ -143,10 +143,7 @@ async function renderBudgetFixed(){
       <option value="normal">일반 고정지출</option>
       <option value="child_allowance">자녀별로 용돈</option>
     </select>
-    <div id="fixedNormalBox">
-      <label>카테고리</label>
-      <select id="fcat"><option>주거</option><option>통신</option><option>보험</option><option>교육</option><option>교통</option><option>식비</option><option>생활</option><option>구독</option><option>기타</option></select>
-    </div>
+    <div id="fixedNormalBox"></div>
     <div id="fixedChildBox" class="hidden">
       <label>자녀</label><select id="fchild"></select>
       <div class="note">🎒 이 용돈 금액은 자녀 용돈기입장에 <b>카드</b> 수입으로 자동 반영됩니다.</div>
@@ -218,9 +215,7 @@ async function fixedEdit(id){
       <option value="normal" ${!isChild?'selected':''}>일반 고정지출</option>
       <option value="child_allowance" ${isChild?'selected':''}>자녀별로 용돈</option>
     </select>
-    <div id="feNormalBox" class="${isChild?'hidden':''}">
-      <label>카테고리</label><select id="fecat">${catOptions}</select>
-    </div>
+    <div id="feNormalBox" class="${isChild?'hidden':''}"></div>
     <div id="feChildBox" class="${isChild?'':'hidden'}">
       <label>자녀</label><select id="fechild">${childOptions}</select>
       <div class="note">🎒 자녀 용돈은 자녀 용돈기입장의 <b>카드</b> 수입으로 자동 반영됩니다.</div>
@@ -248,7 +243,8 @@ async function fixedUpdate(id){
     category='자녀별로 용돈';
     memo=`[[CHILD_ALLOWANCE:${childId}::${text}]]`;
   }else{
-    category=$('fecat').value;
+    const {data:current}=await sb.from('household_recurring_entries').select('category').eq('id',id).single();
+    category=current?.category||'기타';
     memo=text;
   }
   const {error}=await sb.from('household_recurring_entries').update({day_of_month:day,amount,category,memo,active}).eq('id',id);
