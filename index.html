@@ -745,7 +745,7 @@ function updateAllowanceRequestAmount(){
   if(extraEl){
     extraEl.disabled=!custom;
     if(!custom)extraEl.value=fixedExtra;
-    else if(extraEl.value==='')extraEl.value='';
+    else extraEl.value='';
   }
   const extraAmount=custom?Number(extraEl?.value||0):fixedExtra;
   if(totalEl)totalEl.value=base+extraAmount;
@@ -762,7 +762,7 @@ async function sendAllowanceRequest(){
   const total=base+extra;
   if(!date)return alert('날짜를 선택해주세요.');
   if(!item||!base)return alert('항목을 선택해주세요.');
-  if(custom&&extra<0)return alert('추가 금액을 확인해주세요.');
+  if(custom&&extra<1)return alert('기타입력 금액을 입력해주세요.');
   if(total<1)return alert('총 금액을 확인해주세요.');
   const reason=`[[REQUEST_CATEGORY:등산]][[ALLOWANCE_REQUEST_V2]]
 날짜: ${date}
