@@ -144,7 +144,17 @@ async function manageRequestCategories(){const rows=await getRequestCategoryRows
 async function addRequestCategory(){const name=$('newReqCat')?.value.trim();if(!name)return alert('항목 이름을 입력해주세요.');const rows=await getRequestCategoryRows();if(rows.some(r=>r.name===name))return alert('이미 등록된 항목입니다.');const {error}=await sb.from(REQUEST_CAT_TABLE).insert({name,active:true,created_by:user.id});if(error)return alert('항목 추가 실패: '+error.message);saveRequestCatsLocal([...rows.map(r=>r.name),name]);await manageRequestCategories()}
 async function updateRequestCategory(id,index){const rows=await getRequestCategoryRows();const row=rows[index];if(!row)return;const name=$('reqCatEdit_'+index)?.value.trim();if(!name)return alert('항목 이름을 입력해주세요.');if(rows.some((r,i)=>i!==index&&r.name===name))return alert('이미 등록된 항목입니다.');if(String(id).startsWith('local-')){const names=rows.map((r,i)=>i===index?name:r.name);saveRequestCatsLocal(names);return manageRequestCategories()}const {error}=await sb.from(REQUEST_CAT_TABLE).update({name}).eq('id',id);if(error)return alert('항목 수정 실패: '+error.message);saveRequestCatsLocal(rows.map((r,i)=>i===index?name:r.name));await manageRequestCategories()}
 async function removeRequestCategory(id,index){const rows=await getRequestCategoryRows();const row=rows[index];if(!row)return;if(!confirm(`'${row.name}' 항목을 삭제할까요?`))return;if(!String(id).startsWith('local-')){const {error}=await sb.from(REQUEST_CAT_TABLE).update({active:false}).eq('id',id);if(error)return alert('항목 삭제 실패: '+error.message)}const names=rows.filter((_,i)=>i!==index).map(r=>r.name);saveRequestCatsLocal(names);await manageRequestCategories()}
-function allowanceRequestDisplay(reason){const raw=String(reason||'');const m=raw.match(/^\[\[REQUEST_CATEGORY:(.*?)\]\]\s*\[\[TASK_WEEK_REWARD:(\d{4}-\d{2}-\d{2})\]\]\s*(.*)$/s);return m?'주간 달성 보상 · '+m[2]+' 시작 주 · '+(m[3]||'100% 달성'):cleanDisplayText(raw)||'요청 내용';}
+function allowanceRequestDisplay(reason){
+  const raw=String(reason||'');
+  if(raw.includes('[[ALLOWANCE_REQUEST_V2]]')){
+    const get=k=>{const m=raw.match(new RegExp('(?:^|\\n)'+k+':\\s*([^\\n]*)'));return m?m[1].trim():''};
+    const date=get('날짜'),item=get('항목'),extra=get('추가선택'),total=get('총금액');
+    const extraText=extra&&extra!=='없음'?(' · '+extra):'';
+    return [date,item].filter(Boolean).join(' · ')+extraText+(total?' · 총 '+money(Number(total.replace(/[^0-9-]/g,''))):'');
+  }
+  const m=raw.match(/^\[\[REQUEST_CATEGORY:(.*?)\]\]\s*\[\[TASK_WEEK_REWARD:(\d{4}-\d{2}-\d{2})\]\]\s*(.*)$/s);
+  return m?'주간 달성 보상 · '+m[2]+' 시작 주 · '+(m[3]||'100% 달성'):cleanDisplayText(raw)||'요청 내용';
+}
 function parseAllowanceReason(reason){const m=String(reason||'').match(/^\[\[REQUEST_CATEGORY:(.*?)\]\]\s*(?:\n)?([\s\S]*)$/);return m?{category:m[1],memo:m[2]||''}:{category:'기타',memo:String(reason||'')}}
 function requestReason(category,memo){return `[[REQUEST_CATEGORY:${category}]]${memo?`\n${memo}`:''}`}
 function localToday(){const d=new Date();const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`}
@@ -696,8 +706,75 @@ async function decideEntryRequest(id,ok){
   loadAllowancePending();
 }
 
-async function allowanceRequest(){const cats=await getRequestCategories();openModal(`<h2>💬 부모에게 용돈 요청</h2><label>항목</label><select id="rqCat">${cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select><label>금액</label><input id="rqAmt" type="number" min="1" required><label>메모 <span class="mini">선택</span></label><input id="rqReason" placeholder="필요하면 적어주세요"><button class="primary" onclick="sendAllowanceRequest()">요청하기</button><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`)}
-async function sendAllowanceRequest(){const cat=$('rqCat')?.value,amount=Number($('rqAmt')?.value),memo=$('rqReason')?.value.trim()||'';if(!cat)return alert('요청 항목을 선택해주세요.');if(!amount||amount<1)return alert('금액을 입력해주세요.');const {error}=await sb.from('allowance_requests').insert({child_id:child.id,amount,reason:requestReason(cat,memo),requested_by:user.id});if(error)alert(error.message);else{alert('부모에게 승인 요청을 보냈습니다.');closeModal()}}
+const ALLOWANCE_REQUEST_ITEMS=[
+  ['약사사(무등산)',1000],['새인봉(무등산)',5000],['중머리재(무등산)',7000],
+  ['장불재(무등산)',9000],['중봉(무등산)',10000],['서석대(무등산)',15000],
+  ['인왕봉(무등산)',17000],['※비상시(목교)※',8000],['천왕봉(월출산)',20000],
+  ['선재길(오대산)',5000],['비로봉(오대산)',15000]
+];
+const ALLOWANCE_REQUEST_EXTRAS=[
+  ['없음',0],['날씨 추가',1000],['태도 추가',1000],['태도 추가',500],['일출 추가',10000],['기타입력',null]
+];
+function allowanceRequest(){
+  const itemOptions=ALLOWANCE_REQUEST_ITEMS.map(([name,amt])=>`<option value="${esc(name)}|${amt}">${esc(name)}</option>`).join('');
+  const extraOptions=ALLOWANCE_REQUEST_EXTRAS.map(([name,amt],i)=>`<option value="${esc(name)}|${amt==null?'custom':amt}">${esc(name)}${amt!=null?' · '+money(amt):''}</option>`).join('');
+  openModal(`<h2>💬 부모에게 용돈 요청</h2>
+    <label>날짜</label>
+    <input id="rqDate" type="date" value="${localToday()}">
+    <div class="row">
+      <div><label>항목</label><select id="rqItem" onchange="updateAllowanceRequestAmount()">${itemOptions}</select></div>
+      <div><label>금액</label><input id="rqBaseAmt" type="number" disabled></div>
+    </div>
+    <div class="row">
+      <div><label>추가선택</label><select id="rqExtra" onchange="updateAllowanceRequestAmount()">${extraOptions}</select></div>
+      <div><label>금액</label><input id="rqExtraAmt" type="number" disabled></div>
+    </div>
+    <label>총 금액</label><input id="rqTotal" type="number" disabled>
+    <button class="primary" onclick="sendAllowanceRequest()">요청하기</button>
+    <button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);
+  updateAllowanceRequestAmount();
+}
+function updateAllowanceRequestAmount(){
+  const item=String($('rqItem')?.value||'').split('|');
+  const extra=String($('rqExtra')?.value||'').split('|');
+  const base=Number(item[1]||0);
+  const custom=extra[1]==='custom';
+  const fixedExtra=custom?0:Number(extra[1]||0);
+  const baseEl=$('rqBaseAmt'),extraEl=$('rqExtraAmt'),totalEl=$('rqTotal');
+  if(baseEl)baseEl.value=base;
+  if(extraEl){
+    extraEl.disabled=!custom;
+    if(!custom)extraEl.value=fixedExtra;
+    else if(extraEl.value==='')extraEl.value='';
+  }
+  const extraAmount=custom?Number(extraEl?.value||0):fixedExtra;
+  if(totalEl)totalEl.value=base+extraAmount;
+}
+async function sendAllowanceRequest(){
+  const date=$('rqDate')?.value;
+  const itemParts=String($('rqItem')?.value||'').split('|');
+  const extraParts=String($('rqExtra')?.value||'').split('|');
+  const item=itemParts[0]||'';
+  const base=Number(itemParts[1]||0);
+  const extraName=extraParts[0]||'없음';
+  const custom=extraParts[1]==='custom';
+  const extra=custom?Number($('rqExtraAmt')?.value||0):Number(extraParts[1]||0);
+  const total=base+extra;
+  if(!date)return alert('날짜를 선택해주세요.');
+  if(!item||!base)return alert('항목을 선택해주세요.');
+  if(custom&&extra<0)return alert('추가 금액을 확인해주세요.');
+  if(total<1)return alert('총 금액을 확인해주세요.');
+  const reason=`[[REQUEST_CATEGORY:등산]][[ALLOWANCE_REQUEST_V2]]
+날짜: ${date}
+항목: ${item}
+항목금액: ${base}
+추가선택: ${extraName}
+추가금액: ${extra}
+총금액: ${total}`;
+  const {error}=await sb.from('allowance_requests').insert({child_id:child.id,amount:total,reason,requested_by:user.id});
+  if(error)alert('용돈 요청 실패: '+error.message);
+  else{alert('부모에게 승인 요청을 보냈습니다.');closeModal();}
+}
 async function loanRequest(type){const {data:l}=await sb.from('child_loans').select('*').eq('child_id',child.id).single();const {data:t}=await sb.from('loan_transactions').select('*').eq('child_id',child.id);const debt=(t||[]).reduce((a,x)=>a+(x.transaction_type==='borrow'?1:-1)*Number(x.amount),0);const max=type==='borrow'?Math.max(0,Number(l?.credit_limit||0)-debt):debt;openModal(`<h2>${type==='borrow'?'➕ 빌리기':'➖ 갚기'} 요청</h2><div class="note">${type==='borrow'?'현재 추가 대출 가능액: '+money(max):'현재 갚을 수 있는 최대액: '+money(max)}</div><label>금액</label><input id="loanAmt" type="number" min="1" max="${max}"><label>메모</label><input id="loanReason" placeholder="필요하면 적어주세요"><button class="primary" onclick="sendLoan('${type}',${max})">부모에게 승인 요청</button><button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`)}
 async function sendLoan(type,max){const a=Number($('loanAmt').value);if(a<1||a>max)return alert('가능 범위를 확인해주세요.');const {error}=await sb.from('loan_requests').insert({child_id:child.id,request_type:type,amount:a,reason:$('loanReason').value,requested_by:user.id});if(error)alert(error.message);else{alert('부모 승인 요청을 보냈습니다.');closeModal()}}
 async function loadGoals(){const {data:g}=await sb.from('allowance_goals').select('*').eq('child_id',child.id).eq('active',true).order('created_at');$('childGoals').innerHTML=(g||[]).map(x=>`<div class="goal"><b>${esc(x.title)}</b><div class="mini">${money(x.saved_amount)} / ${money(x.target_amount)}</div><div class="progress"><i style="width:${Math.min(100,Number(x.saved_amount)/Number(x.target_amount)*100)}%"></i></div></div>`).join('')||'<div class="empty">목표를 만들어 보세요 🎯</div>'}
