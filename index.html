@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#ffd1e2"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="./manifest.json"><title>경진훈주시라♡ v2026.09.27-entry-approval</title>
+<meta name="theme-color" content="#ffd1e2"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="./manifest.json"><title>경진훈주시라♡ v2026.09.28-fixed-edit-sort</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif;color:#344054;background:linear-gradient(145deg,#fff0f6,#fff9d9 38%,#edffe7 68%,#e8f7ff);min-height:100vh}.app{width:min(760px,100%);margin:auto;padding:12px 10px 40px}.hero{position:relative;cursor:pointer;padding:20px;border-radius:28px;background:linear-gradient(110deg,#ffb6d0,#ffe68f,#b9ed9c,#a9defd);box-shadow:0 10px 28px #71809622;margin-bottom:12px}.hero h1{margin:0;font-size:28px}.hero p{margin:5px 0 0;color:#596579;font-size:12px}.card{background:#ffffffed;border-radius:23px;padding:16px;margin-bottom:12px;box-shadow:0 8px 25px #7180961c}h2{font-size:18px;margin:0 0 12px}h3{font-size:14px;margin:0 0 8px}label{display:block;font-size:12px;font-weight:800;margin:9px 0 5px}input,select,button{font:inherit;width:100%;border:1px solid #e1e7ee;border-radius:13px;padding:11px;background:#fff;color:#344054}button{cursor:pointer}.primary{border:0;font-weight:800;background:linear-gradient(100deg,#ffaccb,#ffe28a,#b8eb9b,#a6dcfa);margin-top:10px}.secondary{background:#f4f6f8;border:0}.danger{background:#fff0f4;border:0;color:#c84668}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.menu{display:grid;grid-template-columns:1fr 1fr;gap:10px}.menu button{padding:20px 10px;border:0;border-radius:20px;font-weight:900;font-size:16px;background:linear-gradient(135deg,#fff,#fff3f8)}.menu small{display:block;font-weight:500;color:#7b8798;margin-top:5px;font-size:10px}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.sum{border-radius:17px;padding:11px 8px;background:#fff}.sum:nth-child(1){background:#fff0f7}.sum:nth-child(2){background:#edffe5}.sum:nth-child(3){background:#eaf8ff}.sum span{display:block;font-size:10px;color:#778397;margin-bottom:4px}.sum b{font-size:14px}.topline{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.logout{width:auto;padding:7px 10px;border:0;background:#f4f6f8;font-size:11px}.back{width:auto;padding:7px 11px;border:0;background:#f4f6f8;font-size:11px}.item{display:grid;grid-template-columns:38px 1fr auto 28px;gap:8px;align-items:center;border:1px solid #edf0f4;border-radius:15px;padding:8px;margin-top:7px;background:#fff}.icon{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,#ffe0ec,#fff1a7)}.memo{font-weight:800;font-size:13px}.meta{font-size:10px;color:#8792a2;margin-top:2px}.amt{font-weight:900;font-size:12px;white-space:nowrap}.income{color:#159447}.expense{color:#e2527b}.del{border:0;padding:6px 0;background:#f5f6f8;color:#8b95a5;font-size:10px}.empty{text-align:center;color:#8b95a5;padding:25px 8px}.status{font-size:11px;color:#657184;margin-top:7px}.error{color:#d84f72}.success{color:#258a4b}.hidden{display:none!important}
@@ -126,10 +126,142 @@ async function syncChildAllowanceRecurring(rows){
     if(insErr)console.warn('자녀 정기용돈 자동 적용 실패:',insErr.message);
   }
 }
-async function renderBudgetFixed(){$('budgetBox').innerHTML='<div class="status">불러오는 중...</div>';const {data,error}=await sb.from('household_recurring_entries').select('*').order('day_of_month');if(error)return $('budgetBox').innerHTML='<div class="error">고정지출 SQL이 아직 적용되지 않았거나 권한 설정이 필요합니다.</div>';await sb.rpc('apply_household_recurring');await syncChildAllowanceRecurring(data||[]);$('budgetBox').innerHTML=`<form onsubmit="fixedAdd(event)"><div class="row"><div><label>매월 일자</label><input id="fd" type="number" min="1" max="31" value="25"></div><div><label>금액</label><input id="fa" type="number" min="1" required></div></div><label>종류</label><select id="fc" onchange="fixedKindChanged()"><option value="normal">일반 고정지출</option><option value="child_allowance">자녀별로 용돈</option></select><div id="fixedNormalBox"><label>카테고리</label><select id="fcat"><option>주거</option><option>통신</option><option>보험</option><option>교육</option><option>교통</option><option>식비</option><option>생활</option><option>구독</option><option>기타</option></select></div><div id="fixedChildBox" class="hidden"><label>자녀</label><select id="fchild"></select><div class="note">🎒 이 용돈 금액은 자녀 용돈기입장에 <b>카드</b> 수입으로 자동 반영됩니다.</div></div><label>내용</label><input id="fm" required placeholder="예: 학원비 / 매월 용돈"><button class="primary">➕ 저장</button></form>${(data||[]).map(x=>{const mm=String(x.memo||'');const hit=mm.match(/^\[\[CHILD_ALLOWANCE:([^:]+)::(.*?)\]\]$/);return `<div class="child-card"><b>${x.category==='자녀별로 용돈'?'🎒 자녀별로 용돈 · 카드 · '+esc(hit?.[2]||'정기 용돈'):esc(x.memo)}</b><div class="mini">매월 ${x.day_of_month}일 · ${money(x.amount)} · ${x.active?'자동 적용':'중지'}</div><button class="danger smallbtn" onclick="fixedDel('${x.id}')">삭제</button></div>`}).join('')||'<div class="empty">등록된 고정지출이 없습니다.</div>'}`;const {data:children}=await sb.from('allowance_children').select('id,name').order('created_at');const orderedChildren=sortChildren(children);$('fchild').innerHTML=(orderedChildren||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');fixedKindChanged()}
-function fixedKindChanged(){const child=$('fc')?.value==='child_allowance';$('fixedNormalBox')?.classList.toggle('hidden',child);$('fixedChildBox')?.classList.toggle('hidden',!child);if(child&&!$('fchild')?.value){}}
-async function fixedAdd(e){e.preventDefault();const kind=$('fc').value;const amount=Number($('fa').value);const day=Number($('fd').value);const text=$('fm').value.trim();if(!amount||amount<1)return alert('금액을 입력해주세요.');if(kind==='child_allowance'){const childId=$('fchild').value;if(!childId)return alert('자녀를 선택해주세요.');const memo=`[[CHILD_ALLOWANCE:${childId}::${text}]]`;const {data:created,error}=await sb.from('household_recurring_entries').insert({day_of_month:day,type:'expense',category:'자녀별로 용돈',memo,amount,active:true,created_by:user.id}).select('*').single();if(error)return alert(error.message);await syncChildAllowanceRecurring([created||{category:'자녀별로 용돈',memo,amount,active:true}]);alert('자녀 용돈이 등록되었습니다. 지정 날짜가 되면 매월 자동 적용됩니다.');renderBudgetFixed();return}const {error}=await sb.from('household_recurring_entries').insert({day_of_month:day,type:'expense',category:$('fcat').value,memo:text,amount,active:true,created_by:user.id});if(error)alert(error.message);else renderBudgetFixed()}
-async function fixedDel(id){if(!confirm('삭제할까요?'))return;await sb.from('household_recurring_entries').delete().eq('id',id);renderBudgetFixed()}
+async function renderBudgetFixed(){
+  $('budgetBox').innerHTML='<div class="status">불러오는 중...</div>';
+  const {data,error}=await sb.from('household_recurring_entries').select('*').order('day_of_month').order('created_at',{ascending:false});
+  if(error)return $('budgetBox').innerHTML='<div class="error">고정지출 SQL이 아직 적용되지 않았거나 권한 설정이 필요합니다.</div>';
+  await sb.rpc('apply_household_recurring');
+  await syncChildAllowanceRecurring(data||[]);
+  const rows=data||[];
+  $('budgetBox').innerHTML=`<form onsubmit="fixedAdd(event)">
+    <div class="row">
+      <div><label>매월 일자</label><input id="fd" type="number" min="1" max="31" value="25"></div>
+      <div><label>금액</label><input id="fa" type="number" min="1" required></div>
+    </div>
+    <label>종류</label>
+    <select id="fc" onchange="fixedKindChanged()">
+      <option value="normal">일반 고정지출</option>
+      <option value="child_allowance">자녀별로 용돈</option>
+    </select>
+    <div id="fixedNormalBox">
+      <label>카테고리</label>
+      <select id="fcat"><option>주거</option><option>통신</option><option>보험</option><option>교육</option><option>교통</option><option>식비</option><option>생활</option><option>구독</option><option>기타</option></select>
+    </div>
+    <div id="fixedChildBox" class="hidden">
+      <label>자녀</label><select id="fchild"></select>
+      <div class="note">🎒 이 용돈 금액은 자녀 용돈기입장에 <b>카드</b> 수입으로 자동 반영됩니다.</div>
+    </div>
+    <label>내용</label><input id="fm" required placeholder="예: 학원비 / 매월 용돈">
+    <button class="primary">➕ 저장</button>
+  </form>
+  <h3 style="margin-top:18px">등록된 고정지출</h3>
+  ${rows.map(x=>{
+    const mm=String(x.memo||'');
+    const hit=mm.match(/^\[\[CHILD_ALLOWANCE:([^:]+)::(.*?)\]\]$/);
+    const label=x.category==='자녀별로 용돈'?'🎒 자녀별로 용돈 · 카드 · '+esc(hit?.[2]||'정기 용돈'):esc(x.memo);
+    return `<div class="child-card">
+      <b>${label}</b>
+      <div class="mini">매월 ${x.day_of_month}일 · ${money(x.amount)} · ${x.active?'자동 적용':'중지'}</div>
+      <div class="row">
+        <button class="secondary smallbtn" onclick="fixedEdit('${x.id}')">✏️ 수정</button>
+        <button class="danger smallbtn" onclick="fixedDel('${x.id}')">삭제</button>
+      </div>
+    </div>`;
+  }).join('')||'<div class="empty">등록된 고정지출이 없습니다.</div>'}`;
+  const {data:children}=await sb.from('allowance_children').select('id,name').order('created_at');
+  const orderedChildren=sortChildren(children);
+  $('fchild').innerHTML=(orderedChildren||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  fixedKindChanged();
+}
+function fixedKindChanged(){
+  const child=$('fc')?.value==='child_allowance';
+  $('fixedNormalBox')?.classList.toggle('hidden',child);
+  $('fixedChildBox')?.classList.toggle('hidden',!child);
+}
+async function fixedAdd(e){
+  e.preventDefault();
+  const kind=$('fc').value,amount=Number($('fa').value),day=Number($('fd').value),text=$('fm').value.trim();
+  if(!amount||amount<1)return alert('금액을 입력해주세요.');
+  if(kind==='child_allowance'){
+    const childId=$('fchild').value;
+    if(!childId)return alert('자녀를 선택해주세요.');
+    const memo=`[[CHILD_ALLOWANCE:${childId}::${text}]]`;
+    const {data:created,error}=await sb.from('household_recurring_entries').insert({day_of_month:day,type:'expense',category:'자녀별로 용돈',memo,amount,active:true,created_by:user.id}).select('*').single();
+    if(error)return alert(error.message);
+    await syncChildAllowanceRecurring([created||{category:'자녀별로 용돈',memo,amount,active:true}]);
+    alert('자녀 용돈이 등록되었습니다. 지정 날짜가 되면 매월 자동 적용됩니다.');
+    renderBudgetFixed();return;
+  }
+  const {error}=await sb.from('household_recurring_entries').insert({day_of_month:day,type:'expense',category:$('fcat').value,memo:text,amount,active:true,created_by:user.id});
+  if(error)alert(error.message);else renderBudgetFixed();
+}
+async function fixedEdit(id){
+  const {data:r,error}=await sb.from('household_recurring_entries').select('*').eq('id',id).single();
+  if(error||!r)return alert('고정지출 정보를 불러오지 못했습니다.');
+  const {data:children}=await sb.from('allowance_children').select('id,name').order('created_at');
+  const orderedChildren=sortChildren(children);
+  const mm=String(r.memo||'');
+  const hit=mm.match(/^\[\[CHILD_ALLOWANCE:([^:]+)::(.*?)\]\]$/);
+  const isChild=r.category==='자녀별로 용돈'&&!!hit;
+  const memo=isChild?(hit?.[2]||'').replace(/\]\]$/,''):mm;
+  const cats=['주거','통신','보험','교육','교통','식비','생활','구독','기타'];
+  const catOptions=cats.map(c=>`<option value="${esc(c)}" ${!isChild&&r.category===c?'selected':''}>${esc(c)}</option>`).join('');
+  const childOptions=(orderedChildren||[]).map(c=>`<option value="${c.id}" ${isChild&&hit?.[1]===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
+  openModal(`<h2>✏️ 고정지출 수정</h2>
+    <div class="note">기존 고정지출 항목 자체를 수정합니다. 이미 자동 생성된 과거 가계부 내역은 변경하지 않습니다.</div>
+    <div class="row">
+      <div><label>매월 일자</label><input id="fed" type="number" min="1" max="31" value="${r.day_of_month}"></div>
+      <div><label>금액</label><input id="fea" type="number" min="1" required value="${Number(r.amount)}"></div>
+    </div>
+    <label>종류</label>
+    <select id="fek" onchange="fixedEditKindChanged()">
+      <option value="normal" ${!isChild?'selected':''}>일반 고정지출</option>
+      <option value="child_allowance" ${isChild?'selected':''}>자녀별로 용돈</option>
+    </select>
+    <div id="feNormalBox" class="${isChild?'hidden':''}">
+      <label>카테고리</label><select id="fecat">${catOptions}</select>
+    </div>
+    <div id="feChildBox" class="${isChild?'':'hidden'}">
+      <label>자녀</label><select id="fechild">${childOptions}</select>
+      <div class="note">🎒 자녀 용돈은 자녀 용돈기입장의 <b>카드</b> 수입으로 자동 반영됩니다.</div>
+    </div>
+    <label>내용</label><input id="fem" required value="${esc(memo)}">
+    <label>자동 적용</label>
+    <select id="feactive"><option value="true" ${r.active?'selected':''}>사용</option><option value="false" ${!r.active?'selected':''}>중지</option></select>
+    <button class="primary" onclick="fixedUpdate('${id}')">저장</button>
+    <button class="secondary" style="margin-top:8px" onclick="closeModal()">닫기</button>`);
+}
+function fixedEditKindChanged(){
+  const child=$('fek')?.value==='child_allowance';
+  $('feNormalBox')?.classList.toggle('hidden',child);
+  $('feChildBox')?.classList.toggle('hidden',!child);
+}
+async function fixedUpdate(id){
+  const kind=$('fek').value,day=Number($('fed').value),amount=Number($('fea').value),text=$('fem').value.trim(),active=$('feactive').value==='true';
+  if(!day||day<1||day>31)return alert('매월 일자를 확인해주세요.');
+  if(!amount||amount<1)return alert('금액을 확인해주세요.');
+  if(!text)return alert('내용을 입력해주세요.');
+  let category,memo;
+  if(kind==='child_allowance'){
+    const childId=$('fechild').value;
+    if(!childId)return alert('자녀를 선택해주세요.');
+    category='자녀별로 용돈';
+    memo=`[[CHILD_ALLOWANCE:${childId}::${text}]]`;
+  }else{
+    category=$('fecat').value;
+    memo=text;
+  }
+  const {error}=await sb.from('household_recurring_entries').update({day_of_month:day,amount,category,memo,active}).eq('id',id);
+  if(error)return alert('고정지출 수정 실패: '+error.message);
+  closeModal();
+  renderBudgetFixed();
+}
+async function fixedDel(id){
+  if(!confirm('삭제할까요?'))return;
+  const {error}=await sb.from('household_recurring_entries').delete().eq('id',id);
+  if(error)return alert('삭제 실패: '+error.message);
+  renderBudgetFixed();
+}
 async function renderBudgetStats(){const {data}=await budgetRows();const by={};data.forEach(x=>{const m=x.date.slice(0,7);by[m]??={i:0,e:0};by[m][x.type==='income'?'i':'e']+=Number(x.amount)});$('budgetBox').innerHTML=`<label>검색</label><input class="search" id="bq" placeholder="내용 · 카테고리 · 날짜" oninput="filterBudget()"><div id="budgetSearch"></div><h3 style="margin-top:18px">최근 월별 합계</h3>${Object.keys(by).sort().reverse().slice(0,12).map(m=>`<div class="child-card"><b>${m}</b><div class="mini">수입 ${money(by[m].i)} · 지출 ${money(by[m].e)} · 잔액 ${money(by[m].i-by[m].e)}</div></div>`).join('')}`;window._budgetData=data;filterBudget()}
 function filterBudget(){const q=($('bq')?.value||'').toLowerCase();const d=(window._budgetData||[]).filter(x=>[x.memo,x.category,x.date,x.amount].join(' ').toLowerCase().includes(q));if($('budgetSearch'))$('budgetSearch').innerHTML=d.slice(0,50).map(x=>`<div class="item"><div class="icon">${icons[x.category]||'🧾'}</div><div><div class="memo">${esc(x.memo)}</div><div class="meta">${x.date} · ${esc(x.category)}</div>${allowanceActorMeta(actors[x.id])}</div><div class="amt ${x.type}">${x.type==='income'?'+':'−'}${money(x.amount)}</div><span></span></div>`).join('')||'<div class="empty">내역이 없습니다.</div>'}
 const REQUEST_CAT_TABLE='allowance_request_categories';
@@ -551,8 +683,8 @@ async function openAllowanceKindHistory(childId,kind){
       created_at:x.created_at
     })):[];
     const rows=[...allowanceRows,...loanRows].sort((a,b)=>
-      String(a.date||'').localeCompare(String(b.date||''))||
-      String(a.created_at||'').localeCompare(String(b.created_at||''))
+      String(b.date||'').localeCompare(String(a.date||''))||
+      String(b.created_at||'').localeCompare(String(a.created_at||''))
     );
 
     const title=kind==='마이너스통장'?'💳 마이너스 통장 거래 내역':'📒 '+kind+' 수입·지출 내역';
@@ -563,7 +695,7 @@ async function openAllowanceKindHistory(childId,kind){
       return '<div class="item"><div class="icon">'+(x.loanTx?'💳':(icons[x.category]||'🧾'))+'</div><div><div class="memo">'+esc(memo)+'</div><div class="meta">'+esc(meta)+'</div></div><div class="amt '+x.type+'">'+(x.type==='income'?'+':'−')+money(x.amount)+'</div><span></span></div>';
     }).join('');
 
-    openModal('<h2>'+title+'</h2><div class="mini">'+esc(cc?.name||'자녀')+' · 과거 → 현재 순 · 총 '+rows.length+'건</div><div style="margin-top:8px">'+(body||'<div class="empty">해당 용돈의 내역이 없습니다.</div>')+'</div><button class="secondary" style="margin-top:10px" onclick="closeModal()">닫기</button>');
+    openModal('<h2>'+title+'</h2><div class="mini">'+esc(cc?.name||'자녀')+' · 현재 → 과거 순 · 총 '+rows.length+'건</div><div style="margin-top:8px">'+(body||'<div class="empty">해당 용돈의 내역이 없습니다.</div>')+'</div><button class="secondary" style="margin-top:10px" onclick="closeModal()">닫기</button>');
   }catch(err){
     console.error('용돈별 내역 조회 오류',err);
     alert(err?.message||'용돈 내역을 불러오지 못했습니다.');
@@ -768,7 +900,7 @@ async function goalAdd(){openModal(`<h2>🎯 저축 목표</h2><label>목표 이
 async function saveGoal(){const {error}=await sb.from('allowance_goals').insert({child_id:child.id,title:$('gt').value,target_amount:Number($('ga').value),created_by:user.id});if(error)alert(error.message);else{closeModal();loadGoals()}}
 function subscribe(){if(window.__taskPenaltyTimer)clearInterval(window.__taskPenaltyTimer);window.__taskPenaltyTimer=setInterval(async()=>{try{if(parent()){const {data:cs}=await sb.from('allowance_children').select('id');for(const c of (cs||[]))await processOverdueTaskPenalties(c.id);if($('main').innerHTML.includes('자녀 용돈기입장'))loadAllowancePending()}else if(child){await processOverdueTaskPenalties(child.id)}}catch(e){console.warn('미이행 보상 자동 처리 확인 실패',e.message)}},60000);channel=sb.channel('family-live').on('postgres_changes',{event:'*',schema:'public',table:'allowance_entries'},()=>{if(parent()&&$('main').innerHTML.includes('자녀 용돈기입장'))renderAllowanceParent();if(!parent())renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_requests'},()=>{if(parent())loadParentPending()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_entry_requests'},()=>{if(parent())loadAllowancePending();if(!parent()&&child)renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'loan_requests'},()=>{if(parent())loadParentPending()}).on('postgres_changes',{event:'*',schema:'public',table:'loan_transactions'},()=>{if(!parent())renderChildHome()}).on('postgres_changes',{event:'*',schema:'public',table:'allowance_tasks'},()=>{if(!parent()&&child)renderTodayTasks(child.id,'todayTasksBox',true);if(parent()&&Array.isArray(window.parentTaskChildIds))window.parentTaskChildIds.forEach(id=>renderTodayTasks(id,'parentTasks_'+id,false));}).subscribe()}
 async function logout(){hideNoticeFab();if(channel)sb.removeChannel(channel);await sb.auth.signOut();location.reload()}
-window.toggleTodayTask=toggleTodayTask;window.taskManageAll=taskManageAll;window.loadTaskManage=loadTaskManage;window.taskAddForm=taskAddForm;window.taskEditForm=taskEditForm;window.saveTask=saveTask;window.taskDelete=taskDelete;window.loadWeeklyTaskPlan=loadWeeklyTaskPlan;window.weeklyPlanAddRow=weeklyPlanAddRow;window.weeklyPlanRemoveRow=weeklyPlanRemoveRow;window.saveWeeklyPlan=saveWeeklyPlan;window.renderBudget=renderBudget;window.renderAllowanceParent=renderAllowanceParent;window.renderParentHome=renderParentHome;window.goHome=goHome;window.homeClick=homeClick;window.openNoticeList=openNoticeList;window.openNoticeDetail=openNoticeDetail;window.noticeForm=noticeForm;window.saveNotice=saveNotice;window.deleteNotice=deleteNotice;window.renderBudgetForm=renderBudgetForm;window.renderBudgetFixed=renderBudgetFixed;window.renderBudgetStats=renderBudgetStats;window.renderBudgetForm=renderBudgetForm;window.renderBudgetStats=renderBudgetStats;window.renderParentHome=renderParentHome;window.childDetail=childDetail;window.allowanceAuditActors=allowanceAuditActors;window.parentEntryForm=parentEntryForm;window.parentEntryTypeChanged=parentEntryTypeChanged;window.saveParentEntry=saveParentEntry;window.childAccount=childAccount;window.childLoan=childLoan;window.saveLoanLimit=saveLoanLimit;window.addLoanTransaction=addLoanTransaction;window.updateLoanTransaction=updateLoanTransaction;window.saveChildAccount=saveChildAccount;window.budgetAdd=budgetAdd;window.budgetDel=budgetDel;window.fixedAdd=fixedAdd;window.fixedDel=fixedDel;window.fixedKindChanged=fixedKindChanged;window.syncChildAllowanceRecurring=syncChildAllowanceRecurring;window.filterBudget=filterBudget;window.decide=decide;window.decideTaskCompletionApproval=decideTaskCompletionApproval;window.decideTaskPenaltyApproval=decideTaskPenaltyApproval;window.decideTaskApproval=decideTaskApproval;window.decideTaskApproval=decideTaskApproval;window.manageChildPhotos=manageChildPhotos;window.previewChildPhotoCount=previewChildPhotoCount;window.addChildPhotos=addChildPhotos;window.deleteChildPhoto=deleteChildPhoto;window.renderChildHome=renderChildHome;window.fetchWeekTaskStats=fetchWeekTaskStats;window.renderWeeklyTaskStats=renderWeeklyTaskStats;window.requestWeeklyTaskReward=requestWeeklyTaskReward;window.childEntries=childEntries;window.openAllowanceKindHistory=openAllowanceKindHistory;window.allowanceRequest=allowanceRequest;window.childExpenseForm=childExpenseForm;window.saveChildExpense=saveChildExpense;window.childUseForm=childUseForm;window.saveChildUse=saveChildUse;window.decideEntryRequest=decideEntryRequest;window.sendAllowanceRequest=sendAllowanceRequest;window.manageRequestCategories=manageRequestCategories;window.addRequestCategory=addRequestCategory;window.updateRequestCategory=updateRequestCategory;window.removeRequestCategory=removeRequestCategory;window.loanRequest=loanRequest;window.sendLoan=sendLoan;window.goalAdd=goalAdd;window.saveGoal=saveGoal;window.loadGoals=loadGoals;window.closeModal=closeModal;window.openModal=openModal;window.logout=logout;$('loginBtn').onclick=login;$('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});sb.auth.getSession().then(async({data})=>{if(data.session){user=data.session.user;await boot()}}).catch(e=>message('앱 초기화 오류: '+e.message));
+window.toggleTodayTask=toggleTodayTask;window.taskManageAll=taskManageAll;window.loadTaskManage=loadTaskManage;window.taskAddForm=taskAddForm;window.taskEditForm=taskEditForm;window.saveTask=saveTask;window.taskDelete=taskDelete;window.loadWeeklyTaskPlan=loadWeeklyTaskPlan;window.weeklyPlanAddRow=weeklyPlanAddRow;window.weeklyPlanRemoveRow=weeklyPlanRemoveRow;window.saveWeeklyPlan=saveWeeklyPlan;window.renderBudget=renderBudget;window.renderAllowanceParent=renderAllowanceParent;window.renderParentHome=renderParentHome;window.goHome=goHome;window.homeClick=homeClick;window.openNoticeList=openNoticeList;window.openNoticeDetail=openNoticeDetail;window.noticeForm=noticeForm;window.saveNotice=saveNotice;window.deleteNotice=deleteNotice;window.renderBudgetForm=renderBudgetForm;window.renderBudgetFixed=renderBudgetFixed;window.renderBudgetStats=renderBudgetStats;window.renderBudgetForm=renderBudgetForm;window.renderBudgetStats=renderBudgetStats;window.renderParentHome=renderParentHome;window.childDetail=childDetail;window.allowanceAuditActors=allowanceAuditActors;window.parentEntryForm=parentEntryForm;window.parentEntryTypeChanged=parentEntryTypeChanged;window.saveParentEntry=saveParentEntry;window.childAccount=childAccount;window.childLoan=childLoan;window.saveLoanLimit=saveLoanLimit;window.addLoanTransaction=addLoanTransaction;window.updateLoanTransaction=updateLoanTransaction;window.saveChildAccount=saveChildAccount;window.budgetAdd=budgetAdd;window.budgetDel=budgetDel;window.fixedAdd=fixedAdd;window.fixedDel=fixedDel;window.fixedKindChanged=fixedKindChanged;window.fixedEdit=fixedEdit;window.fixedUpdate=fixedUpdate;window.fixedEditKindChanged=fixedEditKindChanged;window.syncChildAllowanceRecurring=syncChildAllowanceRecurring;window.filterBudget=filterBudget;window.decide=decide;window.decideTaskCompletionApproval=decideTaskCompletionApproval;window.decideTaskPenaltyApproval=decideTaskPenaltyApproval;window.decideTaskApproval=decideTaskApproval;window.decideTaskApproval=decideTaskApproval;window.manageChildPhotos=manageChildPhotos;window.previewChildPhotoCount=previewChildPhotoCount;window.addChildPhotos=addChildPhotos;window.deleteChildPhoto=deleteChildPhoto;window.renderChildHome=renderChildHome;window.fetchWeekTaskStats=fetchWeekTaskStats;window.renderWeeklyTaskStats=renderWeeklyTaskStats;window.requestWeeklyTaskReward=requestWeeklyTaskReward;window.childEntries=childEntries;window.openAllowanceKindHistory=openAllowanceKindHistory;window.allowanceRequest=allowanceRequest;window.childExpenseForm=childExpenseForm;window.saveChildExpense=saveChildExpense;window.childUseForm=childUseForm;window.saveChildUse=saveChildUse;window.decideEntryRequest=decideEntryRequest;window.sendAllowanceRequest=sendAllowanceRequest;window.manageRequestCategories=manageRequestCategories;window.addRequestCategory=addRequestCategory;window.updateRequestCategory=updateRequestCategory;window.removeRequestCategory=removeRequestCategory;window.loanRequest=loanRequest;window.sendLoan=sendLoan;window.goalAdd=goalAdd;window.saveGoal=saveGoal;window.loadGoals=loadGoals;window.closeModal=closeModal;window.openModal=openModal;window.logout=logout;$('loginBtn').onclick=login;$('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});sb.auth.getSession().then(async({data})=>{if(data.session){user=data.session.user;await boot()}}).catch(e=>message('앱 초기화 오류: '+e.message));
 })().catch(e=>{const m=document.getElementById('loginMsg');if(m){m.textContent='앱 연결 오류: '+e.message;m.className='status error'}});
 </script>
 <script>
