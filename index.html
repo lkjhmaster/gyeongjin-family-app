@@ -217,26 +217,9 @@ async function requestWeeklyTaskReward(){
 }
 function taskPenaltyDate(daysAgo=1){const d=new Date(localToday()+'T00:00:00');d.setDate(d.getDate()-daysAgo);const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 async function processOverdueTaskPenalties(childId){
-  if(!childId||!user)return;const prev=taskPenaltyDate(1),lockKey=childId+'|'+prev;
-  window.__taskPenaltyLocks=window.__taskPenaltyLocks||new Set();if(window.__taskPenaltyLocks.has(lockKey))return;window.__taskPenaltyLocks.add(lockKey);
-  try{
-    const {data:tasks}=await sb.from('allowance_tasks').select('*').eq('child_id',childId).eq('active',true);
-    const {data:completions}=await sb.from('allowance_task_completions').select('task_id').eq('child_id',childId).eq('task_date',prev);
-    const completedIds=new Set((completions||[]).map(x=>String(x.task_id)));
-    const {data:logs}=await sb.from('allowance_tasks').select('title,completed_date').eq('child_id',childId).eq('active',false).eq('completed_date',prev).ilike('title','[[TASK_LOG:%');
-    (logs||[]).forEach(x=>{const v=String(x.title||'');if(v.startsWith('[[TASK_LOG:'))completedIds.add(v.slice(11,-2));});
-    const {data:existing}=await sb.from('allowance_task_penalties').select('task_id,task_date,status').eq('child_id',childId).eq('task_date',prev);
-    for(const task of (tasks||[])){
-      if(String(task.title||'').startsWith('[[TASK_LOG:'))continue;
-      const amount=Number(task.noncompletion_enabled?task.noncompletion_amount:(Number(task.reward_amount||0)<0?task.reward_amount:0));
-      if(!amount||completedIds.has(String(task.id)))continue;
-      const scheduledDate=task.scheduled_date?String(task.scheduled_date):prev;if(scheduledDate!==prev)continue;
-      const createdDate=task.created_at?String(task.created_at).slice(0,10):prev;if(createdDate>prev)continue;
-      if((existing||[]).some(x=>String(x.task_id)===String(task.id)&&String(x.task_date)===prev))continue;
-      const {error}=await sb.from('allowance_task_penalties').insert({task_id:task.id,child_id:childId,task_date:prev,amount:Math.abs(amount),status:'pending',created_by:user.id});
-      if(error)console.warn('오늘의 할 일 미이행 승인요청 생성 실패',error.message);
-    }
-  }finally{window.__taskPenaltyLocks.delete(lockKey)}
+  // 미이행에 따른 용돈 차감 기능은 사용하지 않습니다.
+  // 기존 데이터의 잔존 penalty가 있더라도 신규 미이행 차감 요청을 생성하지 않습니다.
+  return;
 }
 function dailyTaskHtml(rows,childMode=false){
   const total=(rows||[]).length,done=(rows||[]).filter(x=>x.completed).length,pct=total?Math.round(done/total*100):0;
