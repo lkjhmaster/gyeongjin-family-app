@@ -716,8 +716,8 @@ const ALLOWANCE_REQUEST_EXTRAS=[
   ['없음',0],['날씨 추가',1000],['태도 추가',1000],['태도 추가',500],['일출 추가',10000],['기타입력',null]
 ];
 function allowanceRequest(){
-  const itemOptions=ALLOWANCE_REQUEST_ITEMS.map(([name,amt])=>`<option value="${esc(name)}|${amt}">${esc(name)}</option>`).join('');
-  const extraOptions=ALLOWANCE_REQUEST_EXTRAS.map(([name,amt],i)=>`<option value="${esc(name)}|${amt==null?'custom':amt}">${esc(name)}${amt!=null?' · '+money(amt):''}</option>`).join('');
+  const itemOptions=ALLOWANCE_REQUEST_ITEMS.map(([name,amt],i)=>`<option value="${i}">${esc(name)}</option>`).join('');
+  const extraOptions=ALLOWANCE_REQUEST_EXTRAS.map(([name,amt],i)=>`<option value="${i}">${esc(name)}${amt!=null?' · '+money(amt):''}</option>`).join('');
   openModal(`<h2>💬 부모에게 용돈 요청</h2>
     <label>날짜</label>
     <input id="rqDate" type="date" value="${localToday()}">
@@ -735,30 +735,33 @@ function allowanceRequest(){
   updateAllowanceRequestAmount();
 }
 function updateAllowanceRequestAmount(){
-  const item=String($('rqItem')?.value||'').split('|');
-  const extra=String($('rqExtra')?.value||'').split('|');
+  const itemIndex=Number($('rqItem')?.value);
+  const extraIndex=Number($('rqExtra')?.value);
+  const item=ALLOWANCE_REQUEST_ITEMS[itemIndex]||['',0];
+  const extra=ALLOWANCE_REQUEST_EXTRAS[extraIndex]||['없음',0];
   const base=Number(item[1]||0);
-  const custom=extra[1]==='custom';
+  const custom=extra[1]===null;
   const fixedExtra=custom?0:Number(extra[1]||0);
   const baseEl=$('rqBaseAmt'),extraEl=$('rqExtraAmt'),totalEl=$('rqTotal');
-  if(baseEl)baseEl.value=base;
+  if(baseEl){baseEl.value=base;baseEl.disabled=true;}
   if(extraEl){
     extraEl.disabled=!custom;
-    if(!custom)extraEl.value=fixedExtra;
-    else extraEl.value='';
+    extraEl.value=custom?'':fixedExtra;
   }
   const extraAmount=custom?Number(extraEl?.value||0):fixedExtra;
-  if(totalEl)totalEl.value=base+extraAmount;
+  if(totalEl){totalEl.value=base+extraAmount;totalEl.disabled=true;}
 }
 async function sendAllowanceRequest(){
   const date=$('rqDate')?.value;
-  const itemParts=String($('rqItem')?.value||'').split('|');
-  const extraParts=String($('rqExtra')?.value||'').split('|');
-  const item=itemParts[0]||'';
-  const base=Number(itemParts[1]||0);
-  const extraName=extraParts[0]||'없음';
-  const custom=extraParts[1]==='custom';
-  const extra=custom?Number($('rqExtraAmt')?.value||0):Number(extraParts[1]||0);
+  const itemIndex=Number($('rqItem')?.value);
+  const extraIndex=Number($('rqExtra')?.value);
+  const itemData=ALLOWANCE_REQUEST_ITEMS[itemIndex]||['',0];
+  const extraData=ALLOWANCE_REQUEST_EXTRAS[extraIndex]||['없음',0];
+  const item=itemData[0]||'';
+  const base=Number(itemData[1]||0);
+  const extraName=extraData[0]||'없음';
+  const custom=extraData[1]===null;
+  const extra=custom?Number($('rqExtraAmt')?.value||0):Number(extraData[1]||0);
   const total=base+extra;
   if(!date)return alert('날짜를 선택해주세요.');
   if(!item||!base)return alert('항목을 선택해주세요.');
