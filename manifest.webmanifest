@@ -1,9 +1,9 @@
 {
-  "id": "/",
+  "id": "/?app=family-v2",
   "name": "경진훈주시라",
   "short_name": "경진훈주시라",
   "description": "우리 가족이 함께할 시간을 정하고 추억을 기록하는 가족 앱",
-  "start_url": "/",
+  "start_url": "/?app=family-v2",
   "scope": "/",
   "display": "standalone",
   "background_color": "#fffaf4",
