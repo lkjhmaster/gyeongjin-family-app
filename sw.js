@@ -1,4 +1,4 @@
-const CACHE_NAME = "gyeongjin-family-v16.4";
+const CACHE_NAME = "gyeongjin-family-v16.5";
 const ASSETS = ["/", "/index.html", "/manifest.webmanifest"];
 self.addEventListener("install", event => {
   event.waitUntil(
