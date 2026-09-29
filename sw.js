@@ -1,5 +1,5 @@
-const CACHE_NAME = "gyeongjin-family-v16.3";
-const ASSETS = ["/", "/index.html", "/manifest.json"];
+const CACHE_NAME = "gyeongjin-family-v16.4";
+const ASSETS = ["/", "/index.html", "/manifest.webmanifest"];
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
