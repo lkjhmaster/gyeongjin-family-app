@@ -67,4 +67,9 @@ function pickFamilyRole(role,el){newMemberRole=role;el.parentElement.querySelect
 function saveFamilyMember(){const n=$('#memberName').value.trim();if(!n){toast('이름을 입력해주세요');return}const isParent=newMemberRole==='부모';family.members.push({name:n,role:newMemberRole,admin:isParent,emoji:isParent?'👤':'👧'});localStorage.setItem('gyeongjin_family_members',JSON.stringify(family.members));toast(n+' 가족 구성원을 등록했어요');setTimeout(familyScreen,500)}
 normalizeState();
 home();
-// 서비스워커는 모바일 캐시 문제를 방지하기 위해 현재 배포본에서는 사용하지 않습니다.</script></body></html>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(err => console.warn('Service worker registration failed:', err));
+  });
+}
+// 서비스워커 등록 완료</script></body></html>
