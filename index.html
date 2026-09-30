@@ -16,7 +16,7 @@ async function installApp(){if(!deferredInstallPrompt){toast("아직 설치 조�
 
 const savedMemories=(()=>{try{return JSON.parse(localStorage.getItem('gyeongjin_memories')||'null')}catch(e){return null}})();
 const savedEvent=(()=>{try{return JSON.parse(localStorage.getItem('gyeongjin_event')||'null')}catch(e){return null}})();
-const state={page:'home',selected:[],vote:{a:3,b:2,c:1},event:savedEvent,memories:Array.isArray(savedMemories)&&savedMemories.length?savedMemories:[{title:'주말 저녁 한강 산책',date:'2026.09.20',text:'걷다가 편의점 아이스크림을 먹었다. 별것 아닌데 오래 기억에 남을 것 같다.',mood:'😊'}]};
+const state={page:'home',selected:[],vote:{a:3,b:2,c:1},event:savedEvent,memories:Array.isArray(savedMemories)?savedMemories:[]};
 const $=s=>document.querySelector(s);function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',1600)}
 function nav(k){document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));$('#nav-'+k)?.classList.add('active')}
 function shell(html){$('#main').innerHTML=html}
@@ -66,4 +66,4 @@ function pickFamilyRole(role,el){newMemberRole=role;el.parentElement.querySelect
 function saveFamilyMember(){const n=$('#memberName').value.trim();if(!n){toast('이름을 입력해주세요');return}const isParent=newMemberRole==='부모';family.members.push({name:n,role:newMemberRole,admin:isParent,emoji:isParent?'👤':'👧'});localStorage.setItem('gyeongjin_family_members',JSON.stringify(family.members));toast(n+' 가족 구성원을 등록했어요');setTimeout(familyScreen,500)}
 normalizeState();
 home();
-// 서비스워커는 모바일 캐시 문제를 방지하기 위해 현재 배포본에서는 사용하지 않습니다.</script></body></html>
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}</script></body></html>
