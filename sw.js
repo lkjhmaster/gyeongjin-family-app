@@ -1,4 +1,4 @@
-const CACHE_NAME = "gyeongjin-family-v16.4";
+const CACHE_NAME = "gyeongjin-family-v16.5";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192-v2.png", "./icon-512-v2.png"];
 
 self.addEventListener("install", event => {
@@ -27,15 +27,15 @@ self.addEventListener("fetch", event => {
   // HTML은 항상 최신 서버 버전을 우선 사용합니다.
   if (event.request.mode === "navigate" || url.pathname.endsWith(".html") || url.pathname === "/") {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: "no-store" })
         .then(response => {
           if (response && response.ok) {
             const copy = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+            caches.open(CACHE_NAME).then(cache => cache.put("./index.html", copy));
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match("./index.html").then(cached => cached || caches.match("./")))
     );
     return;
   }
