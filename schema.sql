@@ -42,3 +42,21 @@ CREATE TABLE IF NOT EXISTS family_state (
 CREATE INDEX IF NOT EXISTS idx_members_family ON members(family_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_member ON sessions(member_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+
+
+CREATE TABLE IF NOT EXISTS password_change_requests (
+  id TEXT PRIMARY KEY,
+  family_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  reviewed_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at TEXT,
+  FOREIGN KEY(family_id) REFERENCES families(id) ON DELETE CASCADE,
+  FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE,
+  FOREIGN KEY(reviewed_by) REFERENCES members(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_requests_family_status ON password_change_requests(family_id,status);
