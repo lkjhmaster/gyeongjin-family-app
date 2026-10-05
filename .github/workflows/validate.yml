@@ -1,0 +1,17 @@
+name: Validate app
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check inline JavaScript syntax
+        run: node scripts/check-inline-js.mjs
+      - name: Check Worker syntax
+        run: node --check src/worker.js
