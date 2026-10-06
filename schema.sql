@@ -60,3 +60,30 @@ CREATE TABLE IF NOT EXISTS password_change_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_password_requests_family_status ON password_change_requests(family_id,status);
+
+
+CREATE TABLE IF NOT EXISTS recurring_expenses (
+  id TEXT PRIMARY KEY,
+  family_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('insurance','allowance','other')),
+  title TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  billing_day INTEGER NOT NULL CHECK (billing_day BETWEEN 1 AND 31),
+  allowance_member_name TEXT,
+  allowance_wallet TEXT DEFAULT 'free',
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(family_id) REFERENCES families(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS recurring_expense_runs (
+  recurring_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(recurring_id, period),
+  FOREIGN KEY(recurring_id) REFERENCES recurring_expenses(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_expenses_family_active ON recurring_expenses(family_id,active);
