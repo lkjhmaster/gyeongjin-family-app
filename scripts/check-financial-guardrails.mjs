@@ -13,6 +13,9 @@ const checks=[
  ['conflicting duplicate chore requests rejected',worker.includes('prior.request_kind!==kind||prior.note!==note')],
  ['chore requests have unique daily identity',migration.includes('UNIQUE(family_id,member_id,chore_id,occurrence_date)')],
  ['reward posting has unique request key',migration.includes('request_id TEXT PRIMARY KEY')],
+ ['child cannot forge approved allowance entries',worker.includes('entry.status!=="pending"')&&worker.includes('entry.requestedBy!==me.name')],
+ ['child cannot modify existing ledger entries',worker.includes('before.some((entry,i)=>JSON.stringify(entry)!==JSON.stringify(after[i]))')],
+ ['child writes use optimistic concurrency',worker.includes('AND value_json=?')&&worker.includes('용돈 원장이 변경됐습니다')],
  ['child cannot change protected financial state',worker.includes('!me.is_admin&&["allowance_audit","allowance_limits","household_ledger","chore_templates"].includes(b.key)')]
 ];
 for(const [name,ok] of checks){console.log((ok?'PASS ':'FAIL ')+name);assert.ok(ok,name)}
