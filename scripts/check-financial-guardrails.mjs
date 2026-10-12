@@ -12,7 +12,8 @@ const checks=[
  ['chore completion reward cannot be silently skipped',worker.includes('request.request_kind==="done"')&&worker.includes('보상 원장 연동 전에는 승인할 수 없습니다')],
  ['conflicting duplicate chore requests rejected',worker.includes('prior.request_kind!==kind||prior.note!==note')],
  ['chore requests have unique daily identity',migration.includes('UNIQUE(family_id,member_id,chore_id,occurrence_date)')],
- ['reward posting has unique request key',migration.includes('request_id TEXT PRIMARY KEY')]
+ ['reward posting has unique request key',migration.includes('request_id TEXT PRIMARY KEY')],
+ ['child cannot change protected financial state',worker.includes('!me.is_admin&&["allowance_audit","allowance_limits","household_ledger","chore_templates"].includes(b.key)')]
 ];
 for(const [name,ok] of checks){console.log((ok?'PASS ':'FAIL ')+name);assert.ok(ok,name)}
 console.log('Guardrail checks passed: '+checks.length);
