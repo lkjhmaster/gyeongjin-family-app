@@ -10,6 +10,7 @@ const checks=[
  ['chore requests are posted to server',html.includes("api('/api/chore-requests'")],
  ['chore approval requires parent',worker.includes('if(!me.is_admin)return json({error:"부모 관리자만 승인할 수 있어요."},403)')],
  ['chore completion reward cannot be silently skipped',worker.includes('request.request_kind==="done"')&&worker.includes('보상 원장 연동 전에는 승인할 수 없습니다')],
+ ['conflicting duplicate chore requests rejected',worker.includes('prior.request_kind!==kind||prior.note!==note')],
  ['chore requests have unique daily identity',migration.includes('UNIQUE(family_id,member_id,chore_id,occurrence_date)')],
  ['reward posting has unique request key',migration.includes('request_id TEXT PRIMARY KEY')]
 ];
