@@ -59,11 +59,11 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
    const approved=rows.filter(x=>x.status==="approved"),balance=approved.filter(x=>x.wallet===wallet).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
    const debt=approved.filter(x=>x.wallet==="minus").reduce((n,x)=>n+(x.type==="expense"?Number(x.amount||0):x.type==="income"?-Number(x.amount||0):0),0);
    if(balance<amount)return json({error:"출금 지갑 잔고가 부족합니다."},409);
-   if(debt<amount)return json({error:"현재 마이너스 사용액보다 변제 금액이 큽니다."},409);
+   const fee=wallet==="card"?Math.round(amount*.5):0,repayment=amount-fee;if(debt<repayment)return json({error:"현재 마이너스 사용액보다 실제 상환 금액이 큽니다."},409);
    const stamp=new Date().toISOString(),settlementId=id();
    rows.push({id:settlementId+":debit",date:tx.date,type:"expense",wallet,amount,title:"마이너스 변제 · "+(tx.title||""),status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
-   rows.push({id:settlementId+":credit",date:tx.date,type:"income",wallet:"minus",amount,title:"마이너스 변제 상환",status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
-   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;tx.settlementId=settlementId;
+   rows.push({id:settlementId+":credit",date:tx.date,type:"income",wallet:"minus",amount:repayment,title:"마이너스 변제 상환",status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;tx.settlementId=settlementId;tx.fee=fee;tx.repaymentAmount=repayment;
   }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedAt=new Date().toISOString()}
   ledger[b.child]=rows;
   const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
