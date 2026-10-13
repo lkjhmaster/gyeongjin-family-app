@@ -17,3 +17,5 @@ jobs:
         run: node --check src/worker.js
       - name: Check production allowance UI
         run: node scripts/check-production-allowance.mjs
+      - name: Verify repayment cancellation and UI integration
+        run: node --test scripts/test-repayment.mjs

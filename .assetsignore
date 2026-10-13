@@ -1,0 +1,7 @@
+.git/
+.github/
+src/
+scripts/
+schema.sql
+BACKEND_SETUP.md
+wrangler*
