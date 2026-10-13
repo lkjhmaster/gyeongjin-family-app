@@ -42,6 +42,35 @@ if(url.pathname==="/api/password-requests/review"&&req.method==="POST"){if(!me.i
 if(url.pathname==="/api/recurring-expenses"&&req.method==="GET"){if(!me.is_admin)return json({error:"관리자만 확인할 수 있습니다."},403);const rows=await env.DB.prepare("SELECT * FROM recurring_expenses WHERE family_id=? ORDER BY created_at").bind(me.family_id).all();return json({items:rows.results||[]})}
 if(url.pathname==="/api/recurring-expenses"&&req.method==="POST"){if(!me.is_admin)return json({error:"관리자만 등록할 수 있습니다."},403);const b=await body(req),kind=String(b.kind||""),amount=Number(b.amount),billingDay=Number(b.billingDay);if(!["insurance","allowance","other"].includes(kind)||!b.title||!Number.isInteger(amount)||amount<=0||!Number.isInteger(billingDay)||billingDay<1||billingDay>31)return json({error:"고정지출 정보를 확인해주세요."},400);if(kind==="allowance"&&!b.allowanceMemberName)return json({error:"용돈 대상 자녀를 선택해주세요."},400);const rid=id();await env.DB.prepare("INSERT INTO recurring_expenses(id,family_id,kind,title,amount,billing_day,allowance_member_name,allowance_wallet,created_by) VALUES(?,?,?,?,?,?,?,?,?)").bind(rid,me.family_id,kind,String(b.title).trim(),amount,billingDay,kind==="allowance"?String(b.allowanceMemberName):null,kind==="allowance"?"card":null,me.id).run();return json({ok:true,id:rid},201)}
 if(url.pathname==="/api/recurring-expenses"&&req.method==="PUT"){if(!me.is_admin)return json({error:"관리자만 수정할 수 있습니다."},403);const b=await body(req),kind=String(b.kind||""),amount=Number(b.amount),billingDay=Number(b.billingDay);if(!b.id||!["insurance","allowance","other"].includes(kind)||!b.title||!Number.isInteger(amount)||amount<=0||!Number.isInteger(billingDay)||billingDay<1||billingDay>31)return json({error:"고정지출 정보를 확인해주세요."},400);if(kind==="allowance"&&!b.allowanceMemberName)return json({error:"용돈 대상 자녀를 선택해주세요."},400);const target=await env.DB.prepare("SELECT id FROM recurring_expenses WHERE id=? AND family_id=?").bind(b.id,me.family_id).first();if(!target)return json({error:"고정지출을 찾을 수 없습니다."},404);await env.DB.prepare("UPDATE recurring_expenses SET kind=?,title=?,amount=?,billing_day=?,allowance_member_name=?,allowance_wallet=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND family_id=?").bind(kind,String(b.title).trim(),amount,billingDay,kind==="allowance"?String(b.allowanceMemberName):null,kind==="allowance"?"card":null,b.id,me.family_id).run();return json({ok:true})}
+if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"부모 관리자만 처리할 수 있습니다."},403);
+ const b=await body(req);if(typeof b.child!=="string"||typeof b.id!=="string"||!["approve","reject"].includes(b.action))return json({error:"요청 형식이 올바르지 않습니다."},400);
+ for(let attempt=0;attempt<5;attempt++){
+  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+  if(!state)return json({error:"용돈 원장을 찾을 수 없습니다."},404);
+  let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 데이터 오류"},500)}
+  const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[],idx=rows.findIndex(x=>x.id===b.id);
+  if(idx<0)return json({error:"요청을 찾을 수 없습니다."},404);
+  const tx=rows[idx];if(tx.type!=="minus_repayment")return json({error:"변제 요청이 아닙니다."},400);
+  if(tx.status!=="pending")return json({error:"이미 처리된 요청입니다."},409);
+  const amount=Number(tx.amount),wallet=tx.wallet;
+  if(!Number.isSafeInteger(amount)||amount<=0||!["free","card"].includes(wallet))return json({error:"변제 금액 또는 출금 지갑이 올바르지 않습니다."},400);
+  if(b.action==="approve"){
+   const approved=rows.filter(x=>x.status==="approved"),balance=approved.filter(x=>x.wallet===wallet).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
+   const debt=approved.filter(x=>x.wallet==="minus").reduce((n,x)=>n+(x.type==="expense"?Number(x.amount||0):x.type==="income"?-Number(x.amount||0):0),0);
+   if(balance<amount)return json({error:"출금 지갑 잔고가 부족합니다."},409);
+   if(debt<amount)return json({error:"현재 마이너스 사용액보다 변제 금액이 큽니다."},409);
+   const stamp=new Date().toISOString(),settlementId=id();
+   rows.push({id:settlementId+":debit",date:tx.date,type:"expense",wallet,amount,title:"마이너스 변제 · "+(tx.title||""),status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
+   rows.push({id:settlementId+":credit",date:tx.date,type:"income",wallet:"minus",amount,title:"마이너스 변제 상환",status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;tx.settlementId=settlementId;
+  }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedAt=new Date().toISOString()}
+  ledger[b.child]=rows;
+  const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
+  if(update.meta?.changes===1)return json({ok:true,ledger});
+ }
+ return json({error:"다른 변경과 충돌했습니다. 다시 시도해주세요."},409);
+}
 if(url.pathname==="/api/state"&&req.method==="GET"){const rows=await env.DB.prepare("SELECT state_key,value_json,updated_at FROM family_state WHERE family_id=?").bind(me.family_id).all();const state={};for(const r of rows.results||[]){try{state[r.state_key]=JSON.parse(r.value_json)}catch{}}return json({state})}
 if(url.pathname==="/api/state"&&req.method==="PUT"){const b=await body(req),allowed=new Set(["daily_schedules","family_schedules","monthly_memos","event","memories","member_albums","profile_photos","allowance_ledger","allowance_audit","allowance_limits","allowance_notices","savings_goals","chore_templates","chores","household_ledger"]);if(!allowed.has(b.key))return json({error:"지원하지 않는 데이터 종류입니다."},400);if(b.key==="allowance_notices"&&!me.is_admin)return json({error:"공지사항은 부모 관리자만 수정할 수 있습니다."},403);await env.DB.prepare(`INSERT INTO family_state(family_id,state_key,value_json,updated_at,updated_by) VALUES(?,?,?,CURRENT_TIMESTAMP,?) ON CONFLICT(family_id,state_key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP,updated_by=excluded.updated_by`).bind(me.family_id,b.key,JSON.stringify(b.value??null),me.id).run();return json({ok:true})}
 return json({error:"Not found"},404)}};
