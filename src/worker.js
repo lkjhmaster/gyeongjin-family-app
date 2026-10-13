@@ -55,7 +55,8 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
   if(tx.status!=="pending")return json({error:"이미 처리된 요청입니다."},409);
   const amount=Number(tx.amount),wallet=tx.wallet;
   if(!Number.isSafeInteger(amount)||amount<=0||!["free","card"].includes(wallet))return json({error:"변제 금액 또는 출금 지갑이 올바르지 않습니다."},400);
-  if(b.action==="approve"){
+  if(b.action==="approve"){return json({error:"채무 출처별 수수료 정산 기능을 보완하는 동안 승인이 제한됩니다."},409);
+
    const approved=rows.filter(x=>x.status==="approved"),balance=approved.filter(x=>x.wallet===wallet).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
    const debt=approved.filter(x=>x.wallet==="minus").reduce((n,x)=>n+(x.type==="expense"?Number(x.amount||0):x.type==="income"?-Number(x.amount||0):0),0);
    if(balance<amount)return json({error:"출금 지갑 잔고가 부족합니다."},409);
