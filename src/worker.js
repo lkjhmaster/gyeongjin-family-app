@@ -54,7 +54,10 @@ if(url.pathname==="/api/allowance/minus-repayment/cancel"&&req.method==="POST"){
   if(!request)return json({error:"변제 요청을 찾지 못했습니다."},404);
   if(!["approved","pending"].includes(request.status))return json({error:"이미 취소 또는 처리된 변제입니다."},409);
   const linked=rows.filter(x=>x.repaymentRequestId===request.id);
-  if(request.status==="approved"&&(!request.settlementId||linked.length!==2||linked.some(x=>x.settlementId!==request.settlementId||x.status!=="approved")||!linked.some(x=>x.type==="expense"&&x.wallet===request.wallet)||!linked.some(x=>x.type==="income"&&x.wallet==="minus")))return json({error:"변제 연결 원장에 불일치가 있어 취소를 중단했습니다."},409);
+  if(request.status==="pending"&&linked.length)return json({error:"승인 전 변제에 정산 거래가 연결되어 있어 취소할 수 없습니다."},409);
+  if(request.status==="approved"&&(!request.settlementId||linked.length!==2||linked.some(x=>x.settlementId!==request.settlementId||x.status!=="approved")||linked.filter(x=>x.type==="expense"&&x.wallet===request.wallet&&Number(x.amount)===Number(request.amount)).length!==1||linked.filter(x=>x.type==="income"&&x.wallet==="minus"&&x.repaymentDebtId===request.repaymentDebtId&&Number(x.amount)===Number(request.repaymentAmount)).length!==1))return json({error:"변제 연결 원장에 불일치가 있어 취소를 중단했습니다."},409);
+  const settlementIds=new Set(linked.map(x=>x.id));
+  if(rows.some(x=>x.status==="approved"&&!settlementIds.has(x.id)&&x.repaymentRequestId===request.id))return json({error:"변제 연결 거래를 모두 확인하지 못했습니다."},409);
   const stamp=new Date().toISOString();for(const x of [request,...linked]){x.status="cancelled";x.cancelledAt=stamp;x.cancelledBy=me.name;x.cancellationReason="관리자 변제 취소"}
   const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
   if(update.meta?.changes===1)return json({ok:true,ledger});
