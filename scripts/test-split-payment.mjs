@@ -46,4 +46,11 @@ r=await call('/api/allowance/split/review',{child,id:requestId,action:'cancel'})
 assert.equal(r.status,200);assert.equal(ledger[child].filter(x=>x.splitPaymentId===requestId&&x.status==='cancelled').length,3);
 r=await call('/api/allowance/split/review',{child,id:requestId,action:'cancel'});
 assert.equal(r.status,409);
+const invalidId='split_invalid_amount_001';
+r=await call('/api/allowance/split/request',{child,requestId:invalidId,date:'2026-10-17',title:'문구',amount:'6000',allocations,debtOrigin:'card'});
+assert.equal(r.status,400,'string amounts must be rejected');
+r=await call('/api/allowance/split/request',{child,requestId:invalidId,date:'2026-10-17',title:'문구',amount:6000,allocations:{free:2000,card:3000,minus:1000},debtOrigin:''});
+assert.equal(r.status,400,'minus debt origin must be selected');
+r=await call('/api/allowance/split/request',{child,requestId:invalidId,date:'invalid',title:'문구',amount:6000,allocations,debtOrigin:'card'});
+assert.equal(r.status,400,'invalid date must be rejected');
 console.log('PASS: request retry, approval, duplicate prevention, debt origin, atomic cancellation');
