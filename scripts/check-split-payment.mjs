@@ -1,0 +1,16 @@
+import {readFileSync} from 'node:fs';
+import {Script} from 'node:vm';
+import assert from 'node:assert/strict';
+const html=readFileSync('index.html','utf8');
+const worker=readFileSync('src/worker.js','utf8');
+const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(x=>x[1]).filter(Boolean);
+assert(scripts.length>0,'missing inline JavaScript');
+for(const source of scripts)new Script(source,{filename:'index.html:inline'});
+new Script(worker.replace(/export\s+default\s*\{/,'const __worker = {'),{filename:'src/worker.js'});
+for(const name of ['splitPaymentForm','splitPaymentSubmit','reviewSplitPayment','cancelSplitPayment'])assert(html.includes('function '+name+'('),'missing '+name);
+assert(worker.includes('/api/allowance/split/review'),'missing atomic split endpoint');
+assert(worker.includes('AND value_json=?'),'missing CAS update');
+assert(worker.includes('tx.status!=="pending"'),'missing pending status guard');
+assert(worker.includes('tx.status!=="approved"'),'missing cancellation status guard');
+assert(html.includes('SPLIT_PAYMENT_SERVER_REVIEW_READY=false'),'client safety gate missing');
+console.log('PASS: JavaScript syntax and split payment safety contract');
