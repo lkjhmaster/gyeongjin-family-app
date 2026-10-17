@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {webcrypto} from 'node:crypto';
-globalThis.crypto=webcrypto;
+if(!globalThis.crypto)Object.defineProperty(globalThis,'crypto',{value:webcrypto,configurable:true});
 const {default:worker}=await import(pathToFileURL(process.cwd()+'/src/worker.js'));
 const family='family-test',child='시원이';
 let ledger={[child]:[{id:'income1',date:'2026-10-17',type:'income',wallet:'free',amount:10000,status:'approved'},{id:'income2',date:'2026-10-17',type:'income',wallet:'card',amount:5000,status:'approved'}]};
