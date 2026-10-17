@@ -17,5 +17,9 @@ jobs:
         run: node --check src/worker.js
       - name: Check production allowance UI
         run: node scripts/check-production-allowance.mjs
+      - name: Verify split payment safety and integration
+        run: |
+          node scripts/check-split-payment.mjs
+          node scripts/test-split-payment.mjs
       - name: Verify repayment cancellation and UI integration
         run: node --test scripts/test-repayment.mjs
