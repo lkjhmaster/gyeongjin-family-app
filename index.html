@@ -220,6 +220,8 @@ function splitPaymentUpdate(){
 async function splitPaymentSubmit(encoded){
  const name=decodeURIComponent(encoded),d=splitPaymentDraft();
  if(!allowanceAccessibleChildren().some(x=>x.name===name)||!splitPaymentUpdate()||!d.title||!d.date)return toast('품목·날짜·금액을 확인해 주세요');
+ try{const r=await api('/api/allowance/split/request',{method:'POST',body:JSON.stringify({child:name,title:d.title,date:d.date,amount:d.amount,allocations:d.allocations,debtOrigin:d.debtOrigin})});if(!r.ok)throw Error('요청 저장 실패');localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));toast('통합결제 승인 요청을 저장했어요');allowanceChild(encoded,'free');}catch(e){toast('요청 오류: '+e.message)}
+ return;
  const all=allowanceStore(),rows=Array.isArray(all[name])?all[name]:[];
  const now=new Date().toISOString(),id='split_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
  const tx={id,date:d.date,type:'split_payment',wallet:'split',amount:d.amount,allocations:d.allocations,debtOrigin:d.allocations.minus?d.debtOrigin:'',title:d.title,status:'pending',requestedBy:currentAccount?.name||name,createdAt:now};
