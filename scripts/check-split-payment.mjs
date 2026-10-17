@@ -15,4 +15,7 @@ assert(worker.includes('tx.status!=="approved"'),'missing cancellation status gu
 assert(html.includes("api('/api/allowance/split/review'"),'client server-review integration missing');
 assert(html.includes('split_debt_origin'),'minus origin selector missing');
 assert(worker.includes('tx.debtOrigin'),'minus origin validation missing');
+assert(worker.includes(String.raw`/^\d{4}-\d{2}-\d{2}$/`),'split request date validation broken');
+assert(worker.includes('duplicate:true'),'request retry idempotency missing');
+assert(worker.includes('/api/allowance/split/request'),'request endpoint missing');
 console.log('PASS: JavaScript syntax and split payment safety contract');
