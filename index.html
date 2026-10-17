@@ -235,7 +235,7 @@ async function reviewSplitPayment(encoded,id,action){
   const r=await api('/api/allowance/split/review',{method:'POST',body:JSON.stringify({child:decodeURIComponent(encoded),id,action})});
   if(!r.ok)throw Error('서버 처리 실패');
   localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));
-  await addAllowanceAudit(action==='approve'?'통합결제 승인':'통합결제 거절',decodeURIComponent(encoded),{id},{id,action});
+  try{await addAllowanceAudit(action==='approve'?'통합결제 승인':'통합결제 거절',decodeURIComponent(encoded),{id},{id,action})}catch(auditError){console.warn('통합결제 감사기록 저장 실패',auditError)}
   toast('통합결제 처리 완료');approvalCenter();
  }catch(e){toast('통합결제 처리 오류: '+e.message)}
 }
