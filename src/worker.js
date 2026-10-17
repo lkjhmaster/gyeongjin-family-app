@@ -114,6 +114,7 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
   if(b.action==="cancel"?tx.status!=="approved":tx.status!=="pending")return json({error:"이미 처리된 요청입니다."},409);
   const a=tx.allocations||{},wallets=["free","card","minus"],amount=Number(tx.amount);
   if(!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"금액 검증 실패"},400);
+  if(b.action==="approve"&&a.minus>0&&!["free","card"].includes(tx.debtOrigin))return json({error:"마이너스 출처 지정이 필요합니다."},409);
   const stamp=new Date().toISOString();
   if(b.action==="approve"){
    const approved=rows.filter(x=>x.status==="approved");
@@ -122,7 +123,7 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
    let limits={};try{limits=JSON.parse(lim?.value_json||"{}")||{}}catch{}
    const minusAvailable=Math.max(0,Number(limits[b.child]||0)+balance("minus"));
    if(a.free>balance("free")||a.card>balance("card")||a.minus>minusAvailable)return json({error:"결제수단 잔액이 부족합니다."},409);
-   for(const wallet of wallets)if(a[wallet]>0)rows.push({id:tx.id+"_"+wallet,splitPaymentId:tx.id,date:tx.date,type:"expense",wallet,amount:a[wallet],debtOrigin:wallet==="minus"?"card":"",title:tx.title,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,createdAt:stamp,approvedAt:stamp});
+   for(const wallet of wallets)if(a[wallet]>0)rows.push({id:tx.id+"_"+wallet,splitPaymentId:tx.id,date:tx.date,type:"expense",wallet,amount:a[wallet],debtOrigin:wallet==="minus"?tx.debtOrigin:"",title:tx.title,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,createdAt:stamp,approvedAt:stamp});
    tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;
   }else if(b.action==="reject"){tx.status="rejected";tx.reviewedBy=me.name;tx.reviewedAt=stamp}
   else{
