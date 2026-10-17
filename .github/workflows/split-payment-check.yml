@@ -17,3 +17,4 @@ jobs:
         with:
           node-version: '22'
       - run: node scripts/check-split-payment.mjs
+      - run: node scripts/test-split-payment.mjs
