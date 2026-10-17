@@ -246,7 +246,7 @@ async function cancelSplitPayment(encoded,id){
   const r=await api('/api/allowance/split/review',{method:'POST',body:JSON.stringify({child:decodeURIComponent(encoded),id,action:'cancel'})});
   if(!r.ok)throw Error('서버 처리 실패');
   localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));
-  await addAllowanceAudit('통합결제 취소',decodeURIComponent(encoded),{id},{id,status:'cancelled'});
+  try{await addAllowanceAudit('통합결제 취소',decodeURIComponent(encoded),{id},{id,status:'cancelled'})}catch(auditError){console.warn('통합결제 취소 감사기록 저장 실패',auditError)}
   toast('전체 취소 완료');allowanceChild(encoded,'free');
  }catch(e){toast('통합결제 취소 오류: '+e.message)}
 }
