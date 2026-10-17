@@ -151,7 +151,7 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
   }else if(b.action==="reject"){tx.status="rejected";tx.reviewedBy=me.name;tx.reviewedAt=stamp}
   else{
    const parts=rows.filter(x=>x.splitPaymentId===tx.id&&x.status==="approved");
-   if(parts.length!==wallets.filter(k=>a[k]>0).length||parts.some(x=>a[x.wallet]!==x.amount))return json({error:"연결 거래 검증 실패"},409);
+   if(parts.length!==wallets.filter(k=>a[k]>0).length||parts.some(x=>!wallets.includes(x.wallet)||a[x.wallet]!==x.amount)||new Set(parts.map(x=>x.wallet)).size!==parts.length)return json({error:"연결 거래 검증 실패"},409);
    for(const part of parts){part.status="cancelled";part.cancelledBy=me.name;part.cancelledAt=stamp}
    tx.status="cancelled";tx.cancelledBy=me.name;tx.cancelledAt=stamp;
   }
