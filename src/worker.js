@@ -101,6 +101,26 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
  }
  return json({error:"다른 변경과 충돌했습니다. 다시 시도해주세요."},409);
 }
+if(url.pathname==="/api/allowance/split/request"&&req.method==="POST"){
+ const b=await body(req),a=b.allocations||{},wallets=["free","card","minus"],amount=Number(b.amount);
+ if(typeof b.child!=="string"||typeof b.title!=="string"||!b.title.trim()||b.title.length>40||typeof b.date!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(b.date)||!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"통합결제 입력 오류"},400);
+ if(a.minus>0&&!["free","card"].includes(b.debtOrigin))return json({error:"마이너스 사용 출처를 선택하세요"},400);
+ const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=?").bind(me.family_id,b.child).first();
+ if(!child)return json({error:"가족 구성원을 찾을 수 없습니다"},404);
+ if(!me.is_admin&&me.name!==b.child)return json({error:"본인의 결제만 요청할 수 있습니다"},403);
+ const stamp=new Date().toISOString(),tx={id:id(),date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?b.debtOrigin:"",title:b.title.trim(),status:"pending",requestedBy:me.name,createdAt:stamp};
+ for(let attempt=0;attempt<5;attempt++){
+  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+  if(!state)return json({error:"용돈 원장을 찾을 수 없습니다"},404);
+  let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 오류"},500)}
+  const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[];
+  if(rows.some(x=>x.id===tx.id))return json({ok:true,ledger});
+  ledger[b.child]=[...rows,tx];
+  const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
+  if(update.meta?.changes===1)return json({ok:true,ledger});
+ }
+ return json({error:"동시 수정 충돌"},409);
+}
 if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"부모 관리자만 처리할 수 있습니다."},403);
  const b=await body(req);
