@@ -12,5 +12,7 @@ assert(worker.includes('/api/allowance/split/review'),'missing atomic split endp
 assert(worker.includes('AND value_json=?'),'missing CAS update');
 assert(worker.includes('tx.status!=="pending"'),'missing pending status guard');
 assert(worker.includes('tx.status!=="approved"'),'missing cancellation status guard');
-assert(html.includes('SPLIT_PAYMENT_SERVER_REVIEW_READY=false'),'client safety gate missing');
+assert(html.includes("api('/api/allowance/split/review'"),'client server-review integration missing');
+assert(html.includes('split_debt_origin'),'minus origin selector missing');
+assert(worker.includes('tx.debtOrigin'),'minus origin validation missing');
 console.log('PASS: JavaScript syntax and split payment safety contract');
