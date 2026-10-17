@@ -229,6 +229,9 @@ async function splitPaymentSubmit(encoded){
  allowanceChild(encoded,'free');
 }
 async function reviewSplitPayment(encoded,id,action){
+ if(currentAccount?.isAdmin!==true)return toast('부모 관리자만 처리할 수 있어요');
+ try{const r=await api('/api/allowance/split/review',{method:'POST',body:JSON.stringify({child:decodeURIComponent(encoded),id,action})});if(!r.ok)throw Error('서버 처리 실패');localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));toast('통합결제 처리 완료');approvalCenter();}catch(e){toast('통합결제 처리 오류: '+e.message)}
+ return;
  if(!SPLIT_PAYMENT_SERVER_REVIEW_READY){toast('통합결제는 서버 원자적 처리 구현 후 이용할 수 있어요');return;}
  if(currentAccount?.isAdmin!==true)return toast('부모 관리자만 승인할 수 있어요');
  const name=decodeURIComponent(encoded);
@@ -255,6 +258,10 @@ async function reviewSplitPayment(encoded,id,action){
 }
 
 async function cancelSplitPayment(encoded,id){
+ if(currentAccount?.isAdmin!==true)return toast('부모 관리자만 처리할 수 있어요');
+ if(!confirm('통합결제 전체 취소할까요?'))return;
+ try{const r=await api('/api/allowance/split/review',{method:'POST',body:JSON.stringify({child:decodeURIComponent(encoded),id,action:'cancel'})});if(!r.ok)throw Error('서버 처리 실패');localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));toast('전체 취소 완료');allowanceChild(encoded,'free');}catch(e){toast('통합결제 취소 오류: '+e.message)}
+ return;
  if(!SPLIT_PAYMENT_SERVER_REVIEW_READY){toast('통합결제는 서버 원자적 처리 구현 후 이용할 수 있어요');return;}
  if(currentAccount?.isAdmin!==true)return toast('부모 관리자만 취소할 수 있어요');
  const name=decodeURIComponent(encoded);
