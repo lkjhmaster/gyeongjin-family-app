@@ -139,7 +139,7 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
   if(b.action==="approve"&&a.minus>0&&!["free","card"].includes(tx.debtOrigin))return json({error:"마이너스 출처 지정이 필요합니다."},409);
   const stamp=new Date().toISOString();
   if(b.action==="approve"){
-   const approved=rows.filter(x=>x.status==="approved");
+   const approved=rows.filter(x=>(x.status||"approved")==="approved");
    const balance=w=>approved.filter(x=>x.wallet===w).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
    const lim=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_limits'").bind(me.family_id).first();
    let limits={};try{limits=JSON.parse(lim?.value_json||"{}")||{}}catch{}
