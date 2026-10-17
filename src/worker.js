@@ -108,13 +108,15 @@ if(url.pathname==="/api/allowance/split/request"&&req.method==="POST"){
  const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=?").bind(me.family_id,b.child).first();
  if(!child)return json({error:"가족 구성원을 찾을 수 없습니다"},404);
  if(!me.is_admin&&me.name!==b.child)return json({error:"본인의 결제만 요청할 수 있습니다"},403);
- const stamp=new Date().toISOString(),tx={id:id(),date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?b.debtOrigin:"",title:b.title.trim(),status:"pending",requestedBy:me.name,createdAt:stamp};
+ const requestId=typeof b.requestId==="string"&&/^split_[a-zA-Z0-9_-]{8,90}$/.test(b.requestId)?b.requestId:null;
+ if(!requestId)return json({error:"요청 식별자가 올바르지 않습니다"},400);
+ const stamp=new Date().toISOString(),tx={id:requestId,date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?b.debtOrigin:"",title:b.title.trim(),status:"pending",requestedBy:me.name,createdAt:stamp};
  for(let attempt=0;attempt<5;attempt++){
   const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
   if(!state)return json({error:"용돈 원장을 찾을 수 없습니다"},404);
   let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 오류"},500)}
   const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[];
-  if(rows.some(x=>x.id===tx.id))return json({ok:true,ledger});
+  if(rows.some(x=>x.id===tx.id)){const existing=rows.find(x=>x.id===tx.id);if(existing.type!=="split_payment"||existing.amount!==tx.amount||JSON.stringify(existing.allocations)!==JSON.stringify(tx.allocations)||existing.date!==tx.date||existing.title!==tx.title||existing.debtOrigin!==tx.debtOrigin)return json({error:"동일 식별자의 다른 요청이 존재합니다"},409);return json({ok:true,ledger,duplicate:true})}
   ledger[b.child]=[...rows,tx];
   const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
   if(update.meta?.changes===1)return json({ok:true,ledger});
