@@ -221,8 +221,9 @@ async function splitPaymentSubmit(encoded){
  const name=decodeURIComponent(encoded),d=splitPaymentDraft();
  if(!allowanceAccessibleChildren().some(x=>x.name===name)||!splitPaymentUpdate()||!d.title||!d.date)return toast('품목·날짜·금액을 확인해 주세요');
  const btn=document.getElementById('split_submit');if(btn)btn.disabled=true;
+ const requestId=btn?.dataset.requestId||('split_'+(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2)));if(btn)btn.dataset.requestId=requestId;
  try{
-  const r=await api('/api/allowance/split/request',{method:'POST',body:JSON.stringify({child:name,title:d.title,date:d.date,amount:d.amount,allocations:d.allocations,debtOrigin:d.debtOrigin})});
+  const r=await api('/api/allowance/split/request',{method:'POST',body:JSON.stringify({child:name,requestId,title:d.title,date:d.date,amount:d.amount,allocations:d.allocations,debtOrigin:d.debtOrigin})});
   if(!r.ok)throw Error('요청 저장 실패');
   localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));
   toast('통합결제 승인 요청을 저장했어요');allowanceChild(encoded,'free');
