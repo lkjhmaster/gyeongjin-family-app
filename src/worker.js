@@ -104,6 +104,7 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
 if(url.pathname==="/api/allowance/split/request"&&req.method==="POST"){
  const b=await body(req),a=b.allocations||{},wallets=["free","card","minus"],amount=b.amount;
  if(typeof b.child!=="string"||typeof b.title!=="string"||!b.title.trim()||b.title.length>40||typeof b.date!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"통합결제 입력 오류"},400);
+ if(!Number.isFinite(Date.parse(b.date+"T00:00:00Z"))||new Date(b.date+"T00:00:00Z").toISOString().slice(0,10)!==b.date)return json({error:"날짜 오류"},400);
  if(a.minus>0&&!["free","card"].includes(b.debtOrigin))return json({error:"마이너스 사용 출처를 선택하세요"},400);
  const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=?").bind(me.family_id,b.child).first();
  if(!child)return json({error:"가족 구성원을 찾을 수 없습니다"},404);
