@@ -1,0 +1,19 @@
+name: Split payment safety checks
+on:
+  push:
+    branches: [feature/split-payment-review]
+  pull_request:
+    paths:
+      - 'index.html'
+      - 'src/worker.js'
+      - 'scripts/check-split-payment.mjs'
+      - '.github/workflows/split-payment-check.yml'
+jobs:
+  syntax-and-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/check-split-payment.mjs
