@@ -101,8 +101,44 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
  }
  return json({error:"다른 변경과 충돌했습니다. 다시 시도해주세요."},409);
 }
+if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"부모 관리자만 처리할 수 있습니다."},403);
+ const b=await body(req);
+ if(typeof b.child!=="string"||typeof b.id!=="string"||!["approve","reject","cancel"].includes(b.action))return json({error:"요청 형식 오류"},400);
+ for(let attempt=0;attempt<5;attempt++){
+  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+  if(!state)return json({error:"용돈 원장 없음"},404);
+  let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 형식 오류"},500)}
+  const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[],tx=rows.find(x=>x.id===b.id&&x.type==="split_payment");
+  if(!tx)return json({error:"통합결제 요청 없음"},404);
+  if(b.action==="cancel"?tx.status!=="approved":tx.status!=="pending")return json({error:"이미 처리된 요청입니다."},409);
+  const a=tx.allocations||{},wallets=["free","card","minus"],amount=Number(tx.amount);
+  if(!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"금액 검증 실패"},400);
+  const stamp=new Date().toISOString();
+  if(b.action==="approve"){
+   const approved=rows.filter(x=>x.status==="approved");
+   const balance=w=>approved.filter(x=>x.wallet===w).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
+   const lim=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_limits'").bind(me.family_id).first();
+   let limits={};try{limits=JSON.parse(lim?.value_json||"{}")||{}}catch{}
+   const minusAvailable=Math.max(0,Number(limits[b.child]||0)+balance("minus"));
+   if(a.free>balance("free")||a.card>balance("card")||a.minus>minusAvailable)return json({error:"결제수단 잔액이 부족합니다."},409);
+   for(const wallet of wallets)if(a[wallet]>0)rows.push({id:tx.id+"_"+wallet,splitPaymentId:tx.id,date:tx.date,type:"expense",wallet,amount:a[wallet],debtOrigin:wallet==="minus"?"card":"",title:tx.title,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,createdAt:stamp,approvedAt:stamp});
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;
+  }else if(b.action==="reject"){tx.status="rejected";tx.reviewedBy=me.name;tx.reviewedAt=stamp}
+  else{
+   const parts=rows.filter(x=>x.splitPaymentId===tx.id&&x.status==="approved");
+   if(parts.length!==wallets.filter(k=>a[k]>0).length||parts.some(x=>a[x.wallet]!==x.amount))return json({error:"연결 거래 검증 실패"},409);
+   for(const part of parts){part.status="cancelled";part.cancelledBy=me.name;part.cancelledAt=stamp}
+   tx.status="cancelled";tx.cancelledBy=me.name;tx.cancelledAt=stamp;
+  }
+  ledger[b.child]=rows;
+  const updated=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
+  if(updated.meta?.changes===1)return json({ok:true,ledger});
+ }
+ return json({error:"동시 변경 충돌. 다시 시도해주세요."},409);
+}
 if(url.pathname==="/api/state"&&req.method==="GET"){const rows=await env.DB.prepare("SELECT state_key,value_json,updated_at FROM family_state WHERE family_id=?").bind(me.family_id).all();const state={};for(const r of rows.results||[]){try{state[r.state_key]=JSON.parse(r.value_json)}catch{}}return json({state})}
-if(url.pathname==="/api/state"&&req.method==="PUT"){const b=await body(req),allowed=new Set(["daily_schedules","family_schedules","monthly_memos","event","memories","member_albums","profile_photos","allowance_ledger","allowance_audit","allowance_limits","allowance_notices","savings_goals","chore_templates","chores","household_ledger"]);if(!allowed.has(b.key))return json({error:"지원하지 않는 데이터 종류입니다."},400);if(b.key==="allowance_notices"&&!me.is_admin)return json({error:"공지사항은 부모 관리자만 수정할 수 있습니다."},403);if(b.key==="allowance_ledger"){if(typeof b.expectedJson!=="string")return json({error:"용돈 데이터의 동기화 기준이 없습니다. 새로고침 후 다시 시도해주세요."},409);const current=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();const oldJson=current?.value_json??"null";if(oldJson!==b.expectedJson)return json({error:"다른 기기에서 용돈 내역이 변경되었습니다. 최신 내역을 불러온 후 다시 시도해주세요."},409);let oldLedger,newLedger;try{oldLedger=JSON.parse(oldJson)||{};newLedger=b.value||{}}catch{return json({error:"원장 형식 오류"},400)}if(!newLedger||typeof newLedger!=="object"||Array.isArray(newLedger))return json({error:"원장 형식 오류"},400);for(const [child,rows] of Object.entries(oldLedger)){if(!Array.isArray(rows))continue;const next=Array.isArray(newLedger[child])?newLedger[child]:[];for(const tx of rows.filter(x=>x.settlementId||x.repaymentRequestId)){const found=next.find(x=>x.id===tx.id);if(!found||JSON.stringify(found)!==JSON.stringify(tx))return json({error:"확정된 마이너스 정산 내역은 수정하거나 삭제할 수 없습니다."},409)}}const nextJson=JSON.stringify(newLedger);let result;if(current){result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(nextJson,me.id,me.family_id,oldJson).run()}else{result=await env.DB.prepare("INSERT OR IGNORE INTO family_state(family_id,state_key,value_json,updated_at,updated_by) VALUES(?,?,?,CURRENT_TIMESTAMP,?)").bind(me.family_id,b.key,nextJson,me.id).run()}if(result.meta?.changes!==1)return json({error:"동시 수정 충돌. 다시 불러온 후 시도해주세요."},409);return json({ok:true,value:newLedger})}await env.DB.prepare(`INSERT INTO family_state(family_id,state_key,value_json,updated_at,updated_by) VALUES(?,?,?,CURRENT_TIMESTAMP,?) ON CONFLICT(family_id,state_key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP,updated_by=excluded.updated_by`).bind(me.family_id,b.key,JSON.stringify(b.value??null),me.id).run();return json({ok:true})}
+if(url.pathname==="/api/state"&&req.method==="PUT"){const b=await body(req),allowed=new Set(["daily_schedules","family_schedules","monthly_memos","event","memories","member_albums","profile_photos","allowance_ledger","allowance_audit","allowance_limits","allowance_notices","savings_goals","chore_templates","chores","household_ledger"]);if(!allowed.has(b.key))return json({error:"지원하지 않는 데이터 종류입니다."},400);if(b.key==="allowance_notices"&&!me.is_admin)return json({error:"공지사항은 부모 관리자만 수정할 수 있습니다."},403);if(b.key==="allowance_ledger"){if(typeof b.expectedJson!=="string")return json({error:"용돈 데이터의 동기화 기준이 없습니다. 새로고침 후 다시 시도해주세요."},409);const current=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();const oldJson=current?.value_json??"null";if(oldJson!==b.expectedJson)return json({error:"다른 기기에서 용돈 내역이 변경되었습니다. 최신 내역을 불러온 후 다시 시도해주세요."},409);let oldLedger,newLedger;try{oldLedger=JSON.parse(oldJson)||{};newLedger=b.value||{}}catch{return json({error:"원장 형식 오류"},400)}if(!newLedger||typeof newLedger!=="object"||Array.isArray(newLedger))return json({error:"원장 형식 오류"},400);for(const [child,rows] of Object.entries(oldLedger)){if(!Array.isArray(rows))continue;const next=Array.isArray(newLedger[child])?newLedger[child]:[];for(const tx of rows.filter(x=>x.settlementId||x.repaymentRequestId||x.splitPaymentId||x.type==="split_payment")){const found=next.find(x=>x.id===tx.id);if(!found||JSON.stringify(found)!==JSON.stringify(tx))return json({error:"확정된 마이너스 정산 내역은 수정하거나 삭제할 수 없습니다."},409)}}const nextJson=JSON.stringify(newLedger);let result;if(current){result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(nextJson,me.id,me.family_id,oldJson).run()}else{result=await env.DB.prepare("INSERT OR IGNORE INTO family_state(family_id,state_key,value_json,updated_at,updated_by) VALUES(?,?,?,CURRENT_TIMESTAMP,?)").bind(me.family_id,b.key,nextJson,me.id).run()}if(result.meta?.changes!==1)return json({error:"동시 수정 충돌. 다시 불러온 후 시도해주세요."},409);return json({ok:true,value:newLedger})}await env.DB.prepare(`INSERT INTO family_state(family_id,state_key,value_json,updated_at,updated_by) VALUES(?,?,?,CURRENT_TIMESTAMP,?) ON CONFLICT(family_id,state_key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP,updated_by=excluded.updated_by`).bind(me.family_id,b.key,JSON.stringify(b.value??null),me.id).run();return json({ok:true})}
 return json({error:"Not found"},404)}};
 const APP_ORIGINS=new Set(["https://gyeongjin-family-app.pages.dev","https://gyeongjin-family-app.muse-hooni.workers.dev"]);
 export default {
