@@ -102,7 +102,7 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
  return json({error:"다른 변경과 충돌했습니다. 다시 시도해주세요."},409);
 }
 if(url.pathname==="/api/allowance/split/request"&&req.method==="POST"){
- const b=await body(req),a=b.allocations||{},wallets=["free","card","minus"],amount=Number(b.amount);
+ const b=await body(req),a=b.allocations||{},wallets=["free","card","minus"],amount=b.amount;
  if(typeof b.child!=="string"||typeof b.title!=="string"||!b.title.trim()||b.title.length>40||typeof b.date!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"통합결제 입력 오류"},400);
  if(a.minus>0&&!["free","card"].includes(b.debtOrigin))return json({error:"마이너스 사용 출처를 선택하세요"},400);
  const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=?").bind(me.family_id,b.child).first();
@@ -134,7 +134,7 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
   const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[],tx=rows.find(x=>x.id===b.id&&x.type==="split_payment");
   if(!tx)return json({error:"통합결제 요청 없음"},404);
   if(b.action==="cancel"?tx.status!=="approved":tx.status!=="pending")return json({error:"이미 처리된 요청입니다."},409);
-  const a=tx.allocations||{},wallets=["free","card","minus"],amount=Number(tx.amount);
+  const a=tx.allocations||{},wallets=["free","card","minus"],amount=tx.amount;
   if(!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"금액 검증 실패"},400);
   if(b.action==="approve"&&a.minus>0&&!["free","card"].includes(tx.debtOrigin))return json({error:"마이너스 출처 지정이 필요합니다."},409);
   const stamp=new Date().toISOString();
