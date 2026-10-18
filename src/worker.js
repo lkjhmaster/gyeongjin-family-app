@@ -82,7 +82,7 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
    env.DB.prepare("INSERT INTO child_trade_idempotency(operation_key,transaction_id,result_json,created_at) VALUES(?,?,?,?)").bind(me.family_id+":"+me.id+":"+key,txId,JSON.stringify(result),stamp)
   ]);
   return json(result,201);
- }catch{return json({error:"거래 원장이 준비되지 않았거나 요청이 중복되었습니다. 새로고침 후 확인해주세요.",code:"CHILD_TRADE_WRITE_UNAVAILABLE"},503)}
+ }catch(e){try{const prior=await env.DB.prepare("SELECT result_json FROM child_trade_idempotency WHERE operation_key=?").bind(me.family_id+":"+me.id+":"+key).first();if(prior)return json(JSON.parse(prior.result_json))}catch{}return json({error:"거래 원장이 준비되지 않았거나 요청이 중복되었습니다. 새로고침 후 확인해주세요.",code:"CHILD_TRADE_WRITE_UNAVAILABLE"},503)}
 }
 if(url.pathname==="/api/child-trades"&&req.method==="GET"){
  const status=url.searchParams.get("status")||"active",childName=url.searchParams.get("child");
