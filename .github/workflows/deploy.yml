@@ -30,6 +30,7 @@ jobs:
           node --test scripts/test-child-trade-list.cjs
           node --test scripts/test-child-trade-request.cjs
           node --test scripts/test-child-trade-ui.cjs
+          node --test scripts/test-child-trade-approval.cjs
           python3 scripts/test-child-trade-schema.py
           node scripts/check-production-allowance.mjs
           node --test scripts/test-repayment.mjs
