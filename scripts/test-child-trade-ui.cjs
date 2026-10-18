@@ -3,10 +3,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const html=fs.readFileSync('index.html','utf8');
 const worker=fs.readFileSync('src/worker.js','utf8');
-test('child trades remain non-settling until approval ledger is integrated',()=>{
+test('goods settlement remains disabled while loan approval uses schema readiness',()=>{
  assert.match(worker,/canApprove:schemaReady/);
  assert.match(worker,/canSettle:false/);
- assert.match(html,/송금 승인 기능은 아직 준비 중입니다/);
+ assert.match(html,/childTradeParentApprove/);
 });
 test('loan request is backed by audit and idempotency inserts',()=>{
  assert.match(worker,/INSERT INTO child_trade_transactions/);
