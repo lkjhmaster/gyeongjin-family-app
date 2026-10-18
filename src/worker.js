@@ -47,13 +47,17 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  return json({error:"거래 신청은 아직 활성화되지 않았습니다. 안전한 정산 기능 연결 후 제공됩니다.",code:"CHILD_TRADE_WRITES_DISABLED"},503);
 }
 if(url.pathname==="/api/child-trades"&&req.method==="GET"){
- const status=url.searchParams.get("status")||"active";
+ const status=url.searchParams.get("status")||"active",childName=url.searchParams.get("child");
  if(!["active","completed","cancelled"].includes(status))return json({error:"잘못된 조회 상태입니다."},400);
+ if(!childName||childName.length>80)return json({error:"조회할 자녀를 지정해주세요."},400);
+ const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,childName).first();
+ if(!child)return json({error:"조회할 자녀를 찾을 수 없습니다."},404);
+ if(!me.is_admin&&child.id!==me.id)return json({error:"다른 자녀의 거래는 조회할 수 없습니다."},403);
  const visible=status==="active"?["requested","consented","approved","held","active","delivery_pending","disputed"]:status==="completed"?["settled"]:["cancelled","rejected"];
  const placeholders=visible.map(()=>"?").join(",");
  try{
-  const sql="SELECT id,kind,requester_id,counterparty_id,payer_id,payee_id,source_wallet,destination_wallet,gross_amount,fee_amount,net_amount,status,revision,due_date,created_at,updated_at FROM child_trade_transactions WHERE family_id=? AND (requester_id=? OR counterparty_id=? OR ?=1) AND status IN ("+placeholders+") ORDER BY created_at DESC LIMIT 100";
-  const rows=await env.DB.prepare(sql).bind(me.family_id,me.id,me.id,me.is_admin?1:0,...visible).all();
+  const sql="SELECT id,kind,requester_id,counterparty_id,payer_id,payee_id,source_wallet,destination_wallet,gross_amount,fee_amount,net_amount,status,revision,due_date,created_at,updated_at FROM child_trade_transactions WHERE family_id=? AND (requester_id=? OR counterparty_id=?) AND status IN ("+placeholders+") ORDER BY created_at DESC LIMIT 100";
+  const rows=await env.DB.prepare(sql).bind(me.family_id,child.id,child.id,...visible).all();
   return json({ok:true,transactions:rows.results||[],status});
  }catch(e){return json({error:"거래 원장 준비 중",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
