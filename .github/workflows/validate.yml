@@ -22,6 +22,8 @@ jobs:
         run: node --test scripts/test-child-trade-request.cjs
       - name: Verify child trade UI safeguards
         run: node --test scripts/test-child-trade-ui.cjs
+      - name: Verify D1 schema and pending loan uniqueness
+        run: python3 scripts/test-child-trade-schema.py
       - name: Check Worker syntax
         run: node --check src/worker.js
       - name: Check production allowance UI
