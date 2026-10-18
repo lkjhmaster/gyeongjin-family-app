@@ -76,11 +76,5 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - name: Verify deployed HTML
-        run: |
-          curl --fail --silent --show-error --retry 3 --retry-delay 2 'https://gyeongjin-family-app.muse-hooni.workers.dev/' -o /tmp/family-app.html
-          grep -q 'minus_repayment' /tmp/family-app.html
-          grep -q '통합결제' /tmp/family-app.html
-          grep -q 'childTradeApprovalCards' /tmp/family-app.html
-          grep -q 'childTradeCommand' /tmp/family-app.html
-
+      - name: Verify deployed HTML and service worker after propagation
+        run: node scripts/check-deployed-app.mjs

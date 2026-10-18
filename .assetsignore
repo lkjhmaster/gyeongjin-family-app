@@ -11,3 +11,6 @@ docs/
 tests/
 migrations/
 child-trades-desktop.png
+
+.wrangler/
+node_modules/
