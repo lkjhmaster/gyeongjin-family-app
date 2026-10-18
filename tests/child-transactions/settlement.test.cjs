@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');const {quote,repaymentQuote,refundQuote}=require('../../src/child-transactions/settlement.cjs');
+assert.deepEqual(quote(10000,'card','free'),{gross:10000,fee:5000,net:5000,rate:0.5,source:'card',destination:'free'});
+assert.equal(quote(10000,'minus','card').net,10000);
+assert.equal(quote(10000,'free','card').fee,0);
+assert.equal(repaymentQuote(10000,'card','free',8000).remaining,3000);
+assert.throws(()=>repaymentQuote(20000,'card','free',8000),/exceeds/);
+assert.deepEqual(refundQuote(quote(10000,'card','free'),5000),{refundGross:5000,refundFee:2500,refundNet:2500});
+assert.throws(()=>refundQuote(quote(10000,'card','free'),10001),/invalid/);
+assert.throws(()=>quote(-1,'card','free'),/amount/);
+assert.throws(()=>quote(1000,'card','minus'),/policy adapter/);
+console.log('9 settlement assertions passed');
