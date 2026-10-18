@@ -21,7 +21,8 @@ jobs:
       - name: Test child trade loan request safety
         run: node --test scripts/test-child-trade-request.cjs
       - name: Verify child trade UI safeguards
-        run: node --test scripts/test-child-trade-ui.cjs
+        run: |
+          node --test scripts/test-child-trade-ui.cjs
           node --test scripts/test-child-trade-approval.cjs
       - name: Verify D1 schema and pending loan uniqueness
         run: python3 scripts/test-child-trade-schema.py
