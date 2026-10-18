@@ -126,6 +126,17 @@ if(url.pathname==="/api/child-trades/approval/reject"&&req.method==="POST"){
   return json({ok:true,id:tx.id,status:"rejected"});
  }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
+if(url.pathname==="/api/child-trades/audit"&&req.method==="GET"){
+ const transactionId=url.searchParams.get("id");
+ if(!transactionId)return json({error:"거래번호가 필요합니다."},400);
+ try{
+  const trade=await env.DB.prepare("SELECT requester_id,counterparty_id FROM child_trade_transactions WHERE id=? AND family_id=?").bind(transactionId,me.family_id).first();
+  if(!trade)return json({error:"거래를 찾을 수 없습니다."},404);
+  if(!me.is_admin&&trade.requester_id!==me.id&&trade.counterparty_id!==me.id)return json({error:"열람 권한이 없습니다."},403);
+  const rows=await env.DB.prepare("SELECT actor_id,action,previous_state,next_state,revision,created_at FROM child_trade_audit WHERE transaction_id=? ORDER BY created_at ASC LIMIT 100").bind(transactionId).all();
+  return json({ok:true,history:rows.results||[]});
+ }catch{return json({error:"감사기록을 조회할 수 없습니다."},503)}
+}
 if(url.pathname==="/api/child-trades/approval-queue"&&req.method==="GET"){
  if(!me.is_admin)return json({error:"부모 관리자만 승인대기를 조회할 수 있습니다."},403);
  try{
