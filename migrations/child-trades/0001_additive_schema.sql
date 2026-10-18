@@ -2,6 +2,7 @@
 -- SQLite / Cloudflare D1. All monetary values are integer KRW; no deletes.
 CREATE TABLE IF NOT EXISTS child_trade_transactions (
  id TEXT PRIMARY KEY,
+ family_id TEXT NOT NULL REFERENCES families(id),
  kind TEXT NOT NULL CHECK(kind IN ('loan','goods','repayment')),
  requester_id TEXT NOT NULL,
  counterparty_id TEXT NOT NULL,
@@ -87,8 +88,8 @@ CREATE TABLE IF NOT EXISTS child_trade_idempotency (
  result_json TEXT NOT NULL,
  created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS child_trade_by_requester ON child_trade_transactions(requester_id,status,created_at);
-CREATE INDEX IF NOT EXISTS child_trade_by_counterparty ON child_trade_transactions(counterparty_id,status,created_at);
+CREATE INDEX IF NOT EXISTS child_trade_by_requester ON child_trade_transactions(family_id,requester_id,status,created_at);
+CREATE INDEX IF NOT EXISTS child_trade_by_counterparty ON child_trade_transactions(family_id,counterparty_id,status,created_at);
 CREATE INDEX IF NOT EXISTS child_trade_active_holds ON child_trade_holds(owner_id,wallet,status);
 CREATE INDEX IF NOT EXISTS child_trade_postings_by_wallet ON child_trade_postings(owner_id,wallet,created_at);
 CREATE INDEX IF NOT EXISTS child_trade_open_loans ON child_trade_loans(borrower_id,status,outstanding_amount);
