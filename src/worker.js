@@ -103,9 +103,8 @@ if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
    env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) SELECT ?,id,?,?,?,?,?,?,? FROM child_trade_transactions WHERE id=? AND family_id=? AND status='requested' AND revision=?").bind(auditId,me.id,b.decision,"requested",next,tx.revision+1,null,now,tx.id,me.family_id,tx.revision),
    env.DB.prepare("UPDATE child_trade_transactions SET status=?,revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status='requested' AND revision=?").bind(next,now,tx.id,me.family_id,tx.revision)
   ];
-  await env.DB.batch(statements);
-  const updated=await env.DB.prepare("SELECT status,revision FROM child_trade_transactions WHERE id=? AND family_id=?").bind(tx.id,me.family_id).first();
-  if(updated?.status!==next||updated?.revision!==tx.revision+1)return json({error:"신청 상태가 변경되었습니다. 새로고침해주세요."},409);
+  const decisionResults=await env.DB.batch(statements);
+  if(decisionResults[1]?.meta?.changes!==1)return json({error:"이미 처리된 신청입니다. 새로고침해주세요."},409);
   return json({ok:true,id:tx.id,status:next});
  }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
