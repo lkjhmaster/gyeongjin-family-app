@@ -10,6 +10,7 @@ async function check(){
   assert.equal(data.service,'gyeongjin-family-api');assert.equal(data.database,true);
   assert.ok(data.features.includes('minus-repayment-cancel'));
   assert.ok(data.features.includes('split-payment'),'deployed API must support split payment');
+  assert.ok(data.features.includes('child-trade-loan-approval'),'deployed API must support child loan approval');
   if(process.env.EXPECTED_RELEASE)assert.equal(data.release,process.env.EXPECTED_RELEASE);
   const preflight=await fetch(base+'/api/allowance/minus-repayment/cancel',{method:'OPTIONS',headers:{origin,'access-control-request-method':'POST','access-control-request-headers':'authorization,content-type'},signal:AbortSignal.timeout(15000)});
   assert.equal(preflight.status,204);assert.equal(preflight.headers.get('access-control-allow-origin'),origin);
