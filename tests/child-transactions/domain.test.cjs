@@ -18,4 +18,7 @@ assert.equal(prepareRepayment({gross:6000,sourceWallet:'card',destinationWallet:
 assert.throws(()=>prepareRepayment({gross:12000,sourceWallet:'card',destinationWallet:'free',outstanding:5000}),/exceeds/);
 assert.deepEqual(prepareRefund({payment:goods.payment,refundGross:5000}),{refundGross:5000,refundFee:2500,refundNet:2500});
 assert.throws(()=>prepareRefund({payment:goods.payment,refundGross:5001,refundedGross:5000}),/invalid/);
-console.log('14 domain assertions passed');
+assert.throws(()=>prepareApproval({...pending,kind:'unknown'},{available:10000}),/invalid transaction/);
+assert.throws(()=>prepareApproval({...pending,id:''},{available:10000}),/invalid transaction/);
+assert.throws(()=>prepareGoodsSettlement({...goods,id:'g1',status:'delivery_pending',buyerConfirmed:true,sellerConfirmed:true,parentApproved:true,holdActive:true,payment:{gross:10000,net:9000,fee:500}}),/invalid settlement/);
+console.log('17 domain assertions passed');
