@@ -15,7 +15,7 @@ export async function childTradeLifecycle(req,env,me,json){
  try{
   if(path==='/capabilities'){
    let ready=false;try{await q('SELECT id FROM child_trade_actions LIMIT 0').all();await q('SELECT wallet FROM child_trade_funding LIMIT 0').all();ready=true}catch{}
-   return json({ok:true,readOnly:!ready,canRequest:ready,canConsent:ready,canReject:ready,canApprove:ready,canSettle:ready,canRepay:ready,canRefund:ready,canSplitGoods:ready,requiresMigration:!ready});
+   return json({ok:true,readOnly:!ready,canRequest:ready,canConsent:ready,canReject:ready,canApprove:ready,canSettle:ready,canRepay:ready,canRefund:ready,canSplitGoods:ready,canSellerReceipt:ready,requiresMigration:!ready});
   }
   const b=req.method==='POST'?await req.json():{};
   const members=await all("SELECT id,name,role,is_admin FROM members WHERE family_id=? ORDER BY id",me.family_id);
@@ -90,8 +90,8 @@ export async function childTradeLifecycle(req,env,me,json){
   const setFunding=(tx,parts)=>{add('DELETE FROM child_trade_funding WHERE transaction_id=?',tx.id);for(const p of parts)add("INSERT INTO child_trade_funding(transaction_id,wallet,gross_amount,fee_amount,hold_status) VALUES(?,?,?,?,'planned')",tx.id,p.wallet,p.gross,p.fee);};
   const releaseFunding=(tx,status)=>{add('UPDATE child_trade_holds SET status=?,released_at=? WHERE transaction_id=?',status,now,tx.id);add('UPDATE child_trade_funding SET hold_status=? WHERE transaction_id=?',status,tx.id);};
   function fundsAvailable(tx,parts=funding(tx)){return parts.every(p=>available(tx.payer_id,p.wallet,tx.id)>=p.gross);}
-  function receiveCapacity(owner,tx,net){if(tx.destination_wallet!=='minus')return;
-   const d=detail(tx),debt=rows(owner).find(r=>r.id===d.destination_debt_id&&r.status==='approved'&&r.wallet==='minus'&&r.type==='expense');requireTrade(debt,'마이너스 사용 건을 확인해주세요.');
+  function receiveCapacity(owner,tx,net,debtId=detail(tx).destination_debt_id){if(tx.destination_wallet!=='minus')return;
+   const debt=rows(owner).find(r=>r.id===debtId&&r.status==='approved'&&r.wallet==='minus'&&r.type==='expense');requireTrade(debt,'마이너스 사용 건을 확인해주세요.');
    const repaid=rows(owner).filter(r=>r.status==='approved'&&r.wallet==='minus'&&r.repaymentDebtId===debt.id).reduce((s,r)=>s+(r.type==='income'?r.amount:r.type==='expense'?-r.amount:0),0);
    requireTrade(net<=debt.amount-repaid,'마이너스 사용 잔액을 초과합니다.');
   }
@@ -121,14 +121,15 @@ export async function childTradeLifecycle(req,env,me,json){
   }
   if(path==='/notifications'&&req.method==='GET'){
    const loans=tables.loans.filter(l=>l.outstanding_amount>0&&l.due_date&&l.due_date<day&&(me.is_admin||l.borrower_id===me.id||l.lender_id===me.id));
-   const pending=tables.transactions.filter(t=>(me.is_admin&&t.status==='consented')||(!me.is_admin&&t.counterparty_id===me.id&&t.status==='requested'));
+   const pending=tables.transactions.filter(t=>(me.is_admin&&t.status==='consented')||(!me.is_admin&&(detail(t).consent_required_id||t.counterparty_id)===me.id&&t.status==='requested'));
    return json({ok:true,overdue:loans,pending});
   }
   if(path==='/approval-queue'&&req.method==='GET'){parent();return json({ok:true,transactions:tables.transactions.filter(t=>t.status==='consented'),actions:tables.actions.filter(a=>a.status==='consented')});}
   if(path==='/quote'&&req.method==='POST'){
    requireTrade(child(me.id)&&child(b.counterpartyId)&&b.counterpartyId!==me.id,'자녀 거래 상대방을 확인해주세요.',403);
    const payee=b.kind==='loan'?me.id:b.counterpartyId;
-   return json({ok:true,...paymentQuote(b.kind,b.gross,b.sourceWallet,b.destinationWallet,payee,b.destinationDebtId,b.allocations)});
+   const receiptPending=b.kind==='goods'&&!b.destinationWallet;
+   return json({ok:true,receiptPending,...paymentQuote(b.kind,b.gross,b.sourceWallet,receiptPending?'card':b.destinationWallet,payee,b.destinationDebtId,b.allocations)});
   }
   if(path===''&&req.method==='POST'){
    requireTrade(child(me.id),'자녀만 거래를 신청할 수 있습니다.',403);
@@ -137,17 +138,19 @@ export async function childTradeLifecycle(req,env,me,json){
    if(b.kind==='repayment'){loan=tables.loans.find(l=>l.id===b.loanId&&l.borrower_id===me.id&&l.status==='active'&&l.outstanding_amount>0);requireTrade(loan,'상환할 대여금을 찾을 수 없습니다.');other=loan.lender_id;}
    requireTrade(child(other)&&other!==me.id,'다른 자녀를 선택해주세요.',403);
    const payer=b.kind==='loan'?other:me.id,payee=b.kind==='loan'?me.id:other;
-   const payment=paymentQuote(b.kind,b.gross,b.sourceWallet,b.destinationWallet,payee,b.destinationDebtId,b.allocations);const source=payment.parts[0].wallet;
+   const receiptPending=b.kind==='goods'&&!b.destinationWallet;
+   const destination=receiptPending?'card':b.destinationWallet;
+   const payment=paymentQuote(b.kind,b.gross,b.sourceWallet,destination,payee,b.destinationDebtId,b.allocations);const source=payment.parts[0].wallet;
    requireTrade(typeof b.operationKey==='string'&&/^[a-zA-Z0-9_-]{16,100}$/.test(b.operationKey),'중복 방지 요청 키가 필요합니다.',400);
    requireTrade(!b.dueDate||(/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)&&Number.isFinite(Date.parse(b.dueDate+'T00:00:00Z'))&&new Date(b.dueDate+'T00:00:00Z').toISOString().slice(0,10)===b.dueDate),'상환기한을 확인해주세요.',400);
-   const input={kind:b.kind,counterpartyId:other,gross:b.gross,sourceWallet:source,...(b.allocations?{allocations:Object.fromEntries(payment.parts.map(p=>[p.wallet,p.gross]))}:{}),destinationWallet:b.destinationWallet,destinationDebtId:b.destinationDebtId||null,loanId:b.loanId||null,dueDate:b.dueDate||null,title:String(b.title||'').slice(0,80)};
+   const input={kind:b.kind,counterpartyId:other,gross:b.gross,sourceWallet:source,...(b.allocations?{allocations:Object.fromEntries(payment.parts.map(p=>[p.wallet,p.gross]))}:{}),destinationWallet:destination,destinationDebtId:b.destinationDebtId||null,loanId:b.loanId||null,dueDate:b.dueDate||null,title:String(b.title||'').slice(0,80),...(receiptPending?{receiptPending:true}:{})};
    const key=me.family_id+':'+me.id+':'+b.operationKey;
    const prior=await q('SELECT result_json FROM child_trade_idempotency WHERE operation_key=?',key).first();
    if(prior){const r=JSON.parse(prior.result_json);requireTrade(JSON.stringify(r.input)===JSON.stringify(input),'같은 요청 키로 조건을 변경할 수 없습니다.');return json(r);}
    if(b.kind==='loan')requireTrade(!tables.loans.some(l=>l.borrower_id===me.id&&l.outstanding_amount>0)&&!tables.transactions.some(t=>t.kind==='loan'&&t.payee_id===me.id&&['requested','consented','approved'].includes(t.status)),'미상환 또는 진행 중인 차입이 있습니다.');
    if(loan)requireTrade(payment.net<=loan.outstanding_amount,'남은 원금을 초과한 상환입니다.');
    const tx={id:uid(),kind:b.kind,status:'requested',revision:0};
-   add('INSERT INTO child_trade_transactions(id,family_id,kind,requester_id,counterparty_id,payer_id,payee_id,source_wallet,destination_wallet,gross_amount,fee_amount,net_amount,status,revision,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)',tx.id,me.family_id,b.kind,me.id,other,payer,payee,source,b.destinationWallet,payment.gross,payment.fee,payment.net,'requested',input.dueDate,now,now);
+   add('INSERT INTO child_trade_transactions(id,family_id,kind,requester_id,counterparty_id,payer_id,payee_id,source_wallet,destination_wallet,gross_amount,fee_amount,net_amount,status,revision,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)',tx.id,me.family_id,b.kind,me.id,other,payer,payee,source,destination,payment.gross,payment.fee,payment.net,'requested',input.dueDate,now,now);
    add('INSERT INTO child_trade_details(transaction_id,loan_id,title,destination_debt_id) VALUES(?,?,?,?)',tx.id,loan?.id||null,input.title,input.destinationDebtId);
    if(b.allocations)setFunding(tx,payment.parts);approval(tx,'consent','requester');audit(tx,'request','requested',input);
    const result={ok:true,id:tx.id,status:'requested',...payment,input};
@@ -158,17 +161,37 @@ export async function childTradeLifecycle(req,env,me,json){
   const tx=tables.transactions.find(t=>t.id===transactionId);requireTrade(tx,'거래를 찾을 수 없습니다.',404);
   const participant=me.id===tx.requester_id||me.id===tx.counterparty_id;
   requireTrade(me.is_admin||participant,'이 거래에 접근할 수 없습니다.',403);
+  async function needsReceipt(){
+   if(tx.kind!=='goods')return false;
+   const request=await q("SELECT payload_json FROM child_trade_audit WHERE transaction_id=? AND action='request' ORDER BY revision LIMIT 1",tx.id).first();
+   if(!JSON.parse(request?.payload_json||'{}').receiptPending)return false;
+   const latest=await q("SELECT action FROM child_trade_audit WHERE transaction_id=? AND action IN ('receipt_selected','terms_changed','approve_revise') ORDER BY revision DESC LIMIT 1",tx.id).first();
+   return latest?.action!=='receipt_selected';
+  }
   if(path==='/detail'&&req.method==='GET'){
    const events=await all('SELECT * FROM child_trade_audit WHERE transaction_id=? ORDER BY created_at,id',tx.id);
    const postings=await all('SELECT * FROM child_trade_postings WHERE transaction_id=? ORDER BY created_at,id',tx.id);
-   return json({ok:true,transaction:tx,funding:funding(tx),detail:detail(tx),loan:loanFor(tx)||tables.loans.find(l=>l.id===detail(tx).loan_id),actions:tables.actions.filter(a=>a.transaction_id===tx.id),delivery:tables.delivery.filter(d=>d.transaction_id===tx.id&&d.revision>=(detail(tx).delivery_epoch||0)),events,postings,members:members.map(m=>({id:m.id,name:m.name}))});
+   return json({ok:true,receiptPending:await needsReceipt(),transaction:tx,funding:funding(tx),detail:detail(tx),loan:loanFor(tx)||tables.loans.find(l=>l.id===detail(tx).loan_id),actions:tables.actions.filter(a=>a.transaction_id===tx.id),delivery:tables.delivery.filter(d=>d.transaction_id===tx.id&&d.revision>=(detail(tx).delivery_epoch||0)),events,postings,members:members.map(m=>({id:m.id,name:m.name}))});
   }
   requireTrade(req.method==='POST','지원하지 않는 요청입니다.',405);
   // UI sends the revision; repeat submissions and stale tabs cannot mutate again.
   requireTrade(Number.isInteger(b.revision)&&b.revision===tx.revision,'거래가 변경되었습니다. 새로고침해주세요.');
   const open=tables.actions.find(a=>a.transaction_id===tx.id&&['requested','consented'].includes(a.status));
+  if(path==='/receipt'||path==='/receipt/quote'){
+   requireTrade(tx.kind==='goods'&&me.id===tx.payee_id&&!me.is_admin,'판매자만 수령 용돈을 선택할 수 있습니다.',403);
+   requireTrade(['requested','consented'].includes(tx.status),'부모 승인 전 거래에서 선택해주세요.');
+   const parts=funding(tx),payment=paymentQuote('goods',tx.gross_amount,tx.source_wallet,b.destinationWallet,tx.payee_id,b.destinationDebtId,Object.fromEntries(parts.map(p=>[p.wallet,p.gross])));
+   receiveCapacity(tx.payee_id,{...tx,destination_wallet:b.destinationWallet},payment.net,b.destinationDebtId);
+   if(path==='/receipt/quote')return json({ok:true,...payment});
+   add('UPDATE child_trade_transactions SET destination_wallet=?,fee_amount=?,net_amount=? WHERE id=?',b.destinationWallet,payment.fee,payment.net,tx.id);
+   if(tables.funding.some(f=>f.transaction_id===tx.id))setFunding(tx,payment.parts);
+   add('UPDATE child_trade_details SET destination_debt_id=?,consent_required_id=? WHERE transaction_id=?',b.destinationDebtId||null,tx.payer_id,tx.id);
+   change(tx,'requested');approval(tx,'consent','counterparty');audit(tx,'receipt_selected','requested',{...payment,destinationWallet:b.destinationWallet,destinationDebtId:b.destinationDebtId||null});
+   return await commit({ok:true,buyerConfirmationRequired:true});
+  }
   if(path==='/terms'){
    requireTrade(participant&&!me.is_admin&&['requested','consented'].includes(tx.status),'승인 전 거래 당사자만 조건을 변경할 수 있습니다.',403);
+   if(tx.kind==='goods'&&me.id===tx.payer_id)requireTrade(b.destinationWallet===tx.destination_wallet&&(b.destinationDebtId||null)===(detail(tx).destination_debt_id||null),'수령 용돈은 판매자가 선택합니다.',403);
    const allocations=b.allocations??(tables.funding.some(f=>f.transaction_id===tx.id)?Object.fromEntries(funding(tx).map(p=>[p.wallet,p.gross])):undefined);const payment=paymentQuote(tx.kind,b.gross,b.sourceWallet,b.destinationWallet,tx.payee_id,b.destinationDebtId,allocations);
    add('UPDATE child_trade_transactions SET gross_amount=?,fee_amount=?,net_amount=?,source_wallet=?,destination_wallet=? WHERE id=?',payment.gross,payment.fee,payment.net,payment.parts[0].wallet,b.destinationWallet,tx.id);if(allocations)setFunding(tx,payment.parts);
    add('UPDATE child_trade_details SET destination_debt_id=?,consent_required_id=? WHERE transaction_id=?',b.destinationDebtId||null,me.id===tx.requester_id?tx.counterparty_id:tx.requester_id,tx.id);
@@ -179,12 +202,14 @@ export async function childTradeLifecycle(req,env,me,json){
    requireTrade(['requested','consented'].includes(tx.status),'이미 승인된 거래입니다.');
    requireTrade(['consent','reject','cancel'].includes(b.decision),'결정 오류',400);
    if(b.decision==='consent')requireTrade(me.id===(detail(tx).consent_required_id||tx.counterparty_id)&&tx.status==='requested','상대방만 동의할 수 있습니다.',403);
+   if(b.decision==='consent')requireTrade(!await needsReceipt(),'판매자가 먼저 수령 용돈을 선택해야 합니다.');
    const next=b.decision==='consent'?'consented':b.decision==='reject'?'rejected':'cancelled';
    change(tx,next);approval(tx,b.decision,me.id===tx.requester_id?'requester':'counterparty');audit(tx,b.decision,next);return await commit({ok:true,status:next});
   }
   if(path==='/approval/reject'){parent();requireTrade(tx.status==='consented','승인대기 상태가 아닙니다.');change(tx,'rejected');approval(tx,'reject','parent');audit(tx,'reject','rejected');return await commit({ok:true});}
   if(path==='/approval/approve'){
    parent();requireTrade(tx.status==='consented','승인대기 상태가 아닙니다.');
+   requireTrade(!await needsReceipt(),'판매자 수령 용돈 선택이 필요합니다.');
    requireTrade(tables.approvals.some(a=>a.transaction_id===tx.id&&a.revision===tx.revision&&a.actor_id===(detail(tx).consent_required_id||tx.counterparty_id)&&a.decision==='consent'),'현재 조건에 대한 상대방 동의가 없습니다.');
    const parts=funding(tx);const payment=paymentQuote(tx.kind,tx.gross_amount,tx.source_wallet,tx.destination_wallet,tx.payee_id,detail(tx).destination_debt_id,tx.kind==='goods'?Object.fromEntries(parts.map(p=>[p.wallet,p.gross])):undefined);
    requireTrade(payment.fee===tx.fee_amount&&payment.net===tx.net_amount&&parts.every((p,i)=>p.fee===payment.parts[i].fee),'수수료가 변경되었습니다. 재신청해주세요.');
