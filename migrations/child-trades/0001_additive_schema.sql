@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS child_trade_idempotency (
  result_json TEXT NOT NULL,
  created_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS child_trade_one_pending_loan_per_borrower ON child_trade_transactions(family_id,requester_id) WHERE kind='loan' AND status IN ('requested','consented','approved');
 CREATE INDEX IF NOT EXISTS child_trade_by_requester ON child_trade_transactions(family_id,requester_id,status,created_at);
 CREATE INDEX IF NOT EXISTS child_trade_by_counterparty ON child_trade_transactions(family_id,counterparty_id,status,created_at);
 CREATE INDEX IF NOT EXISTS child_trade_active_holds ON child_trade_holds(owner_id,wallet,status);
