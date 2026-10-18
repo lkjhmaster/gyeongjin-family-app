@@ -20,6 +20,8 @@ jobs:
         run: node --test scripts/test-child-trade-list.cjs
       - name: Test child trade loan request safety
         run: node --test scripts/test-child-trade-request.cjs
+      - name: Verify child trade UI safeguards
+        run: node --test scripts/test-child-trade-ui.cjs
       - name: Check Worker syntax
         run: node --check src/worker.js
       - name: Check production allowance UI
