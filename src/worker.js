@@ -27,7 +27,7 @@ async function processRecurring(env){
 }
 const handler={async scheduled(event,env,ctx){ctx.waitUntil(processRecurring(env))},async fetch(req,env){const url=new URL(req.url);
 if(req.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});if(url.pathname==="/api/health"){
- try{await env.DB.prepare("SELECT 1 FROM families LIMIT 1").first();return json({ok:true,service:"gyeongjin-family-api",database:true,release:env.RELEASE_SHA||"unknown",features:["minus-repayment-cancel","split-payment"]})}
+ try{await env.DB.prepare("SELECT 1 FROM families LIMIT 1").first();return json({ok:true,service:"gyeongjin-family-api",database:true,release:env.RELEASE_SHA||"unknown",features:["minus-repayment-cancel","split-payment","child-trade-loan-approval"]})}
  catch{return json({ok:false,service:"gyeongjin-family-api",database:false},503)}
 }
 if(url.pathname==="/api/setup-status"&&req.method==="GET"){const row=await env.DB.prepare("SELECT COUNT(*) c FROM families").first();return json({initialized:Number(row?.c||0)>0})}
