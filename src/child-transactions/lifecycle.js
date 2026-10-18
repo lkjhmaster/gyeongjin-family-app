@@ -233,8 +233,11 @@ export async function childTradeLifecycle(req,env,me,json){
    const payload=JSON.parse(open.payload_json),hold=tables.holds.find(h=>h.transaction_id===tx.id&&h.status==='active');let next=tx.status;
    if(open.kind==='resolve'){
     requireTrade(tx.status==='disputed','분쟁 상태가 아닙니다.');
-    const dispute=await q("SELECT payload_json FROM child_trade_audit WHERE transaction_id=? AND action='dispute' ORDER BY created_at DESC LIMIT 1",tx.id).first();
-    next=JSON.parse(dispute.payload_json).resumeStatus;if(tx.kind==='loan')add("UPDATE child_trade_loans SET status=CASE WHEN outstanding_amount=0 THEN 'settled' ELSE 'active' END WHERE transaction_id=?",tx.id);
+    const dispute=await q("SELECT payload_json,previous_state FROM child_trade_audit WHERE transaction_id=? AND next_state='disputed' AND previous_state<>'disputed' ORDER BY revision DESC,created_at DESC LIMIT 1",tx.id).first();
+    requireTrade(dispute,'조정 이전 상태의 감사 기록을 확인해주세요.');
+    next=JSON.parse(dispute.payload_json||'{}').resumeStatus||dispute.previous_state;
+    requireTrade(['held','delivery_pending','active','settled'].includes(next),'조정 이전 상태를 확인해주세요.');
+    if(tx.kind==='loan'){const loan=loanFor(tx);requireTrade(loan,'대여 원장을 확인해주세요.');next=loan.outstanding_amount===0?'settled':'active';add("UPDATE child_trade_loans SET status=? WHERE transaction_id=?",next,tx.id);}
    }else if(open.kind==='revise'){
     requireTrade(hold&&tx.kind==='goods','예약된 물품 거래만 변경할 수 있습니다.');
     add("UPDATE child_trade_holds SET status='cancelled',released_at=? WHERE transaction_id=?",now,tx.id);
@@ -248,15 +251,16 @@ export async function childTradeLifecycle(req,env,me,json){
     const refunded=detail(tx).refunded_gross||0,gross=open.kind==='cancel'?tx.gross_amount-refunded:payload.gross;
     requireTrade(amount(gross)&&gross<=tx.gross_amount-refunded,'누적 환불액이 원거래를 초과합니다.');
     const fee=Math.round(tx.fee_amount*(refunded+gross)/tx.gross_amount)-Math.round(tx.fee_amount*refunded/tx.gross_amount),net=gross-fee;
-    if(available(tx.payee_id,tx.destination_wallet)<net){change(tx,'disputed');audit(tx,'refund_insufficient_balance','disputed',{actionId:open.id});return await commit({ok:true,status:'disputed',message:'회수 잔액이 부족하여 부모 조정 상태로 전환했습니다.'});}
+    if(available(tx.payee_id,tx.destination_wallet)<net){if(tx.kind==='loan')add("UPDATE child_trade_loans SET status='disputed' WHERE transaction_id=?",tx.id);change(tx,'disputed');audit(tx,'refund_insufficient_balance','disputed',{actionId:open.id,resumeStatus:tx.status});return await commit({ok:true,status:'disputed',message:'회수 잔액이 부족하여 부모 조정 상태로 전환했습니다.'});}
     const original=await all("SELECT * FROM child_trade_postings WHERE transaction_id=? AND kind IN ('debit','credit','minus_repayment','fee')",tx.id);
     const debit=original.find(p=>p.kind==='debit'),credit=original.find(p=>p.kind==='credit'||p.kind==='minus_repayment'),feePosting=original.find(p=>p.kind==='fee');requireTrade(debit&&credit,'원거래 분개가 없습니다.');
     if(tx.kind==='loan'){const loan=loanFor(tx);requireTrade(loan&&net<=loan.outstanding_amount,'이미 상환된 원금은 대여 환불로 줄일 수 없습니다.');add("UPDATE child_trade_loans SET outstanding_amount=outstanding_amount-?,status=CASE WHEN outstanding_amount=? THEN 'settled' ELSE 'active' END WHERE id=?",net,net,loan.id);}
-    if(tx.kind==='repayment'){const loan=tables.loans.find(l=>l.id===detail(tx).loan_id);requireTrade(loan&&loan.outstanding_amount+net<=loan.principal_amount,'복원할 원금 오류');add("UPDATE child_trade_loans SET outstanding_amount=outstanding_amount+?,status='active' WHERE id=?",net,loan.id);add("UPDATE child_trade_transactions SET status='active',revision=revision+1,updated_at=? WHERE id=?",now,loan.transaction_id);}
+    if(tx.kind==='repayment'){const loan=tables.loans.find(l=>l.id===detail(tx).loan_id);requireTrade(loan&&loan.outstanding_amount+net<=loan.principal_amount,'복원할 원금 오류');add("UPDATE child_trade_loans SET outstanding_amount=outstanding_amount+?,status=CASE WHEN status='disputed' THEN 'disputed' ELSE 'active' END WHERE id=?",net,loan.id);add("UPDATE child_trade_transactions SET status=CASE WHEN status='disputed' THEN 'disputed' ELSE 'active' END,revision=revision+1,updated_at=? WHERE id=?",now,loan.transaction_id);}
     posting(tx,tx.payee_id,tx.destination_wallet,-net,'refund',credit.id,tx.destination_wallet==='minus'?detail(tx).destination_debt_id:null);posting(tx,tx.payer_id,tx.source_wallet,gross,'refund',debit.id,tx.source_wallet==='minus'?debit.id:null);posting(tx,'fee:'+me.family_id,tx.source_wallet,-fee,'refund',feePosting?.id||null);
     add('UPDATE child_trade_details SET refunded_gross=refunded_gross+? WHERE transaction_id=?',gross,tx.id);
     next=refunded+gross===tx.gross_amount?'cancelled':(payload.resumeStatus||tx.status);
     if(tx.kind==='loan'&&loanFor(tx).outstanding_amount===net&&next!=='cancelled')next='settled';
+    if(tx.kind==='loan'&&next==='disputed')add("UPDATE child_trade_loans SET status='disputed' WHERE transaction_id=?",tx.id);
    }
    add("UPDATE child_trade_actions SET status='approved' WHERE id=?",open.id);change(tx,next);approval(tx,'approve','parent');audit(tx,'approve_'+open.kind,next,{actionId:open.id,...payload});return await commit({ok:true});
   }
