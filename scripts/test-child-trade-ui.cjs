@@ -25,3 +25,10 @@ test('loan form is gated on server capability and includes idempotency',()=>{
  assert.match(html,/operationKey:button\.dataset\.key/);
  assert.match(worker,/api\/child-trades\/participants/);
 });
+
+test('loan consent actions are limited to the intended participants',()=>{
+ assert.match(html,/currentAccount\?\.id===x\.counterparty_id/);
+ assert.match(html,/currentAccount\?\.id===x\.requester_id/);
+ assert.match(html,/childTradeDecision/);
+ assert.match(worker,/tx\.status!=="requested"/);
+});
