@@ -87,6 +87,7 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
 if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
  const b=await body(req);
  if(typeof b.transactionId!=="string"||!b.transactionId||!["consent","reject","cancel"].includes(b.decision))return json({error:"요청 정보를 확인해주세요."},400);
+ if(b.decision==="reject"&&me.is_admin)return json({error:"부모의 거절은 승인대기 전용 API에서 처리해주세요."},409);
  try{
   const tx=await env.DB.prepare("SELECT id,kind,requester_id,counterparty_id,status,revision FROM child_trade_transactions WHERE id=? AND family_id=?").bind(b.transactionId,me.family_id).first();
   if(!tx)return json({error:"거래를 찾을 수 없습니다."},404);
