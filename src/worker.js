@@ -34,6 +34,11 @@ if(url.pathname==="/api/setup-status"&&req.method==="GET"){const row=await env.D
 if(url.pathname==="/api/setup"&&req.method==="POST"){const b=await body(req);if(!b.familyName||!b.parentName||!b.password||b.password.length<4)return json({error:"가족명, 부모 이름, 4자 이상 비밀번호가 필요합니다."},400);const exists=await env.DB.prepare("SELECT COUNT(*) c FROM families").first();if(Number(exists?.c||0)>0)return json({error:"초기 가족 설정이 이미 완료되었습니다."},409);const familyId=id(),memberId=id(),salt=id(),hash=await passwordHash(b.password,salt);await env.DB.batch([env.DB.prepare("INSERT INTO families(id,name) VALUES(?,?)").bind(familyId,b.familyName),env.DB.prepare("INSERT INTO members(id,family_id,name,role,is_admin,emoji,password_hash,password_salt) VALUES(?,?,?,?,1,?,?,?)").bind(memberId,familyId,b.parentName,"parent",b.emoji||"🙂",hash,salt)]);const token=await createSession(memberId,env);return json({token,member:{id:memberId,name:b.parentName,role:"parent",isAdmin:true,emoji:b.emoji||"🙂"}})}
 if(url.pathname==="/api/login"&&req.method==="POST"){const b=await body(req);const m=await env.DB.prepare("SELECT * FROM members WHERE name=? LIMIT 1").bind(b.name||"").first();if(!m||await passwordHash(b.password||"",m.password_salt)!==m.password_hash)return json({error:"이름 또는 비밀번호를 확인해주세요."},401);const token=await createSession(m.id,env);return json({token,member:{id:m.id,name:m.name,role:m.role,isAdmin:!!m.is_admin,emoji:m.emoji}})}
 const me=await auth(req,env);if(!me)return json({error:"로그인이 필요합니다."},401);
+if(url.pathname==="/api/child-trades/participants"&&req.method==="GET"){
+ if(me.is_admin)return json({error:"자녀 계정에서만 거래를 신청할 수 있습니다."},403);
+ const rows=await env.DB.prepare("SELECT id,name,emoji FROM members WHERE family_id=? AND is_admin=0 AND id<>? ORDER BY name").bind(me.family_id,me.id).all();
+ return json({ok:true,participants:rows.results||[]});
+}
 if(url.pathname==="/api/child-trades/summary"&&req.method==="GET"){
  const childName=url.searchParams.get("child");
  if(!childName||childName.length>80)return json({error:"조회할 자녀를 지정해주세요."},400);
