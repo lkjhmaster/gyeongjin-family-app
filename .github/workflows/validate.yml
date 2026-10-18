@@ -16,6 +16,8 @@ jobs:
       - name: Test child transaction domain rules
         run: |
           node --test tests/child-transactions/*.test.cjs
+      - name: Test child trade API access control
+        run: node --test scripts/test-child-trade-list.cjs
       - name: Check Worker syntax
         run: node --check src/worker.js
       - name: Check production allowance UI
