@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {Script} from 'node:vm';
 import assert from 'node:assert/strict';
 const html=readFileSync('index.html','utf8');
-const worker=readFileSync('src/worker.js','utf8');
+const worker=readFileSync('src/worker.js','utf8').replace(/^import .*;\r?\n/gm,'');
 const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(x=>x[1]).filter(Boolean);
 assert(scripts.length>0,'missing inline JavaScript');
 for(const source of scripts)new Script(source,{filename:'index.html:inline'});
@@ -24,3 +24,4 @@ assert(html.includes('x.splitPaymentId?'),'individual split part edit/delete pro
 assert(worker.includes('통합결제 생성은 전용 API'),'generic ledger injection protection missing');
 assert(worker.includes('통합결제 변경은 전용 API'),'generic ledger mutation protection missing');
 console.log('PASS: JavaScript syntax and split payment safety contract');
+

@@ -5,3 +5,9 @@ scripts/
 schema.sql
 BACKEND_SETUP.md
 wrangler*
+
+
+docs/
+tests/
+migrations/
+child-trades-desktop.png

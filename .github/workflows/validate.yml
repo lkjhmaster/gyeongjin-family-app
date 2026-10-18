@@ -19,11 +19,11 @@ jobs:
       - name: Test child trade API access control
         run: node --test scripts/test-child-trade-list.cjs
       - name: Test child trade loan request safety
-        run: node --test scripts/test-child-trade-request.cjs
+        run: node --test scripts/test-child-trade-lifecycle.mjs
       - name: Verify child trade UI safeguards
         run: |
           node --test scripts/test-child-trade-ui.cjs
-          node --test scripts/test-child-trade-approval.cjs
+          node --check src/child-transactions/lifecycle.js
       - name: Verify D1 schema and pending loan uniqueness
         run: python3 scripts/test-child-trade-schema.py
       - name: Check Worker syntax
@@ -36,3 +36,11 @@ jobs:
           node scripts/test-split-payment.mjs
       - name: Verify repayment cancellation and UI integration
         run: node --test scripts/test-repayment.mjs
+
+      - name: Build Cloudflare API bundle
+        run: npx --yes wrangler@4 deploy --config wrangler.api.jsonc --dry-run
+      - name: Verify actual desktop browser flows
+        run: |
+          npm install --prefix "$RUNNER_TEMP/family-browser" --no-save --package-lock=false playwright@1.62.1
+          "$RUNNER_TEMP/family-browser/node_modules/.bin/playwright" install --with-deps chromium
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-child-trade-browser.cjs

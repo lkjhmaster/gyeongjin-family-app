@@ -5,10 +5,9 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/deploy.yml'
+concurrency:
+  group: family-app-production
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -28,9 +27,8 @@ jobs:
           node --check src/worker.js
           node --test tests/child-transactions/*.test.cjs
           node --test scripts/test-child-trade-list.cjs
-          node --test scripts/test-child-trade-request.cjs
+          node --test scripts/test-child-trade-lifecycle.mjs
           node --test scripts/test-child-trade-ui.cjs
-          node --test scripts/test-child-trade-approval.cjs
           python3 scripts/test-child-trade-schema.py
           node scripts/check-production-allowance.mjs
           node --test scripts/test-repayment.mjs
@@ -44,20 +42,22 @@ jobs:
           test -n "$CF_API_TOKEN" || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
           test -n "$CF_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
       - name: Verify D1 recovery point before additive migration
-        run: npx --yes wrangler@4 d1 time-travel info gyeongjin-family-db --remote
+        run: npx --yes wrangler@4 d1 time-travel info gyeongjin-family-db --config wrangler.api.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Apply approved additive child-trade schema
-        run: npx --yes wrangler@4 d1 execute gyeongjin-family-db --remote --file=migrations/child-trades/0001_additive_schema.sql
+        run: |
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0001_additive_schema.sql
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0002_atomic_lifecycle.sql
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Verify child-trade tables and concurrency guard in production D1
         run: |
-          npx --yes wrangler@4 d1 execute gyeongjin-family-db --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='child_trade_transactions';" | tee /tmp/child-trade-table.txt
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='child_trade_transactions';" | tee /tmp/child-trade-table.txt
           grep -q 'child_trade_transactions' /tmp/child-trade-table.txt
-          npx --yes wrangler@4 d1 execute gyeongjin-family-db --remote --command="SELECT name FROM sqlite_master WHERE type='index' AND name='child_trade_one_pending_loan_per_borrower';" | tee /tmp/child-trade-index.txt
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='index' AND name='child_trade_one_pending_loan_per_borrower';" | tee /tmp/child-trade-index.txt
           grep -q 'child_trade_one_pending_loan_per_borrower' /tmp/child-trade-index.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -81,5 +81,6 @@ jobs:
           curl --fail --silent --show-error --retry 3 --retry-delay 2 'https://gyeongjin-family-app.muse-hooni.workers.dev/' -o /tmp/family-app.html
           grep -q 'minus_repayment' /tmp/family-app.html
           grep -q '통합결제' /tmp/family-app.html
-          grep -q 'childTradeParentApprove' /tmp/family-app.html
-          grep -q 'childTradeSubmit' /tmp/family-app.html
+          grep -q 'childTradeApprovalCards' /tmp/family-app.html
+          grep -q 'childTradeCommand' /tmp/family-app.html
+
