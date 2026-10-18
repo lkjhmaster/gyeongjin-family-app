@@ -53,7 +53,7 @@ if(url.pathname==="/api/child-trades/summary"&&req.method==="GET"){
  }catch{return json({error:"채권·채무 원장 준비 중",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
 if(url.pathname==="/api/child-trades/capabilities"&&req.method==="GET"){
- let schemaReady=false;try{await env.DB.prepare("SELECT id FROM child_trade_transactions LIMIT 0").all();await env.DB.prepare("SELECT id FROM child_trade_audit LIMIT 0").all();await env.DB.prepare("SELECT operation_key FROM child_trade_idempotency LIMIT 0").all();await env.DB.prepare("SELECT id FROM child_trade_loans LIMIT 0").all();const guard=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='child_trade_one_pending_loan_per_borrower'").first();schemaReady=!!guard}catch{}return json({ok:true,readOnly:!schemaReady,canRequest:schemaReady,canConsent:schemaReady,canReject:schemaReady,canApprove:false,canSettle:false,canRepay:false,canRefund:false,requiresMigration:!schemaReady});
+ let schemaReady=false;try{await env.DB.prepare("SELECT id FROM child_trade_transactions LIMIT 0").all();await env.DB.prepare("SELECT id FROM child_trade_audit LIMIT 0").all();await env.DB.prepare("SELECT operation_key FROM child_trade_idempotency LIMIT 0").all();await env.DB.prepare("SELECT id FROM child_trade_loans LIMIT 0").all();const guard=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='child_trade_one_pending_loan_per_borrower'").first();schemaReady=!!guard}catch{}return json({ok:true,readOnly:!schemaReady,canRequest:schemaReady,canConsent:schemaReady,canReject:schemaReady,canApprove:schemaReady,canSettle:false,canRepay:false,canRefund:false,requiresMigration:!schemaReady});
 }
 if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  const b=await body(req);
