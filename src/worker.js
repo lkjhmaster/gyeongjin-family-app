@@ -163,7 +163,7 @@ if(url.pathname==="/api/child-trades/approval/approve"&&req.method==="POST"){
    env.DB.prepare("UPDATE child_trade_transactions SET status='active',revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status='consented' AND revision=? AND EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(now,tx.id,me.family_id,tx.revision,loanId),
    env.DB.prepare("INSERT INTO child_trade_approvals(id,transaction_id,revision,actor_id,actor_role,decision,created_at) SELECT ?,?,? ,?,'parent','approve',? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(approvalId,tx.id,tx.revision+1,me.id,now,loanId)
   ];
-  if(tx.fee_amount>0)statements.splice(4,0,env.DB.prepare("INSERT INTO child_trade_postings(id,transaction_id,owner_id,wallet,amount,kind,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(feeId,tx.id,tx.counterparty_id,tx.source_wallet,tx.fee_amount,"fee",now,loanId));
+  if(tx.fee_amount>0)statements.splice(4,0,env.DB.prepare("INSERT INTO child_trade_postings(id,transaction_id,owner_id,wallet,amount,kind,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(feeId,tx.id,"fee:"+me.family_id,tx.source_wallet,tx.fee_amount,"fee",now,loanId));
   const results=await env.DB.batch(statements);
   if(results.some(x=>x?.meta?.changes!==1))return json({error:"거래가 다른 요청과 충돌했습니다. 거래 내역을 다시 확인해주세요."},409);
   return json({ok:true,id:tx.id,status:"active",principal:tx.net_amount});
