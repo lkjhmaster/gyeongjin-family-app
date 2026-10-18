@@ -98,6 +98,7 @@ async function childTradeCommand(button){
  }catch(e){toast(e.message||'거래 처리에 실패했습니다.')}finally{button.disabled=false}
 }
 async function childTradeDetail(id){
+ if(typeof refreshApprovalBadge==='function')refreshApprovalBadge();
  const info=await api('/api/child-trades/detail?id='+encodeURIComponent(id));childTradeScreen.detail=info;
  const tx=info.transaction,admin=!!currentAccount?.isAdmin,mine=currentAccount?.id,participant=mine===tx.requester_id||mine===tx.counterparty_id,open=info.actions.find(a=>['requested','consented'].includes(a.status));
  let controls='';

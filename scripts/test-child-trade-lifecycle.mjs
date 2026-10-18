@@ -192,3 +192,27 @@ test('seller minus receipt can use only the sellers own debt with sufficient rem
  assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'minus',destinationDebtId:'seller-debt'})).status,200);assert.equal(h.row(id).net_amount,750);
  assert.equal((await h.mutate('a','/child-trades/terms',id,{gross:1200,allocations:split,sourceWallet:'free',destinationWallet:'card'})).status,403);
 });
+test('child inbox exposes only their own actionable requests and removes processed consent',async()=>{
+ const h=await fixture(),id=await h.create();
+ const inbox=async actor=>(await h.call(actor,'/child-trades/notifications')).data;
+ assert.equal((await inbox('b')).requests.length,1);assert.equal((await inbox('b')).requests[0].transactionId,id);
+ assert.equal((await inbox('a')).requests.length,0);assert.equal((await inbox('a')).waiting[0].transactionId,id);assert.deepEqual((await inbox('c')).requests,[]);assert.deepEqual((await inbox('c')).waiting,[]);
+ assert.deepEqual((await inbox('p')).requests,[]);assert.equal((await h.call('a','/child-trades/notifications?child=Bob')).data.requests.length,0);
+ await h.mutate('b','/child-trades/decision',id,{decision:'consent'});assert.deepEqual((await inbox('b')).requests,[]);assert.equal((await inbox('b')).waiting.length,1);assert.equal((await h.mutate('b','/child-trades/approval/approve',id)).status,403);
+ assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,200);assert.deepEqual((await inbox('b')).waiting,[]);
+});
+test('inbox follows seller receipt, buyer confirmation, and each childs pending delivery',async()=>{
+ const h=await fixture(),id=await h.create('goods',{destinationWallet:null});const inbox=async actor=>(await h.call(actor,'/child-trades/notifications')).data;
+ assert.equal((await inbox('b')).requests[0].label,'판매대금 수령 선택·동의');await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card'});
+ assert.equal((await inbox('a')).requests[0].label,'구매 조건 최종 확인');assert.deepEqual((await inbox('b')).requests,[]);
+ await h.mutate('a','/child-trades/decision',id,{decision:'consent'});await h.mutate('p','/child-trades/approval/approve',id);
+ for(const actor of ['a','b'])assert.equal((await inbox(actor)).requests[0].kind,'delivery');assert.deepEqual((await inbox('c')).requests,[]);
+ await h.mutate('a','/child-trades/delivery',id);assert.deepEqual((await inbox('a')).requests,[]);assert.equal((await inbox('a')).waiting.length,1);assert.equal((await inbox('b')).requests.length,1);
+ await h.mutate('b','/child-trades/delivery',id);for(const actor of ['a','b'])assert.deepEqual((await inbox(actor)).requests,[]);
+});
+test('refund and amendment requests reach only the other participant and block delivery notices',async()=>{
+ const h=await fixture(),id=await h.create('goods');await h.approve(id);const change=await h.mutate('a','/child-trades/action/request',id,{kind:'cancel'});
+ const inbox=async actor=>(await h.call(actor,'/child-trades/notifications')).data;
+ assert.deepEqual((await inbox('a')).requests,[]);assert.equal((await inbox('b')).requests.length,1);assert.equal((await inbox('b')).requests[0].actionId,change.data.actionId);assert.equal((await inbox('b')).requests[0].kind,'action');assert.deepEqual((await inbox('c')).waiting,[]);
+ await h.mutate('b','/child-trades/action/decision',id,{actionId:change.data.actionId,decision:'consent'});assert.deepEqual((await inbox('b')).requests,[]);assert.equal((await inbox('a')).waiting.length,1);
+});

@@ -122,7 +122,20 @@ export async function childTradeLifecycle(req,env,me,json){
   if(path==='/notifications'&&req.method==='GET'){
    const loans=tables.loans.filter(l=>l.outstanding_amount>0&&l.due_date&&l.due_date<day&&(me.is_admin||l.borrower_id===me.id||l.lender_id===me.id));
    const pending=tables.transactions.filter(t=>(me.is_admin&&t.status==='consented')||(!me.is_admin&&(detail(t).consent_required_id||t.counterparty_id)===me.id&&t.status==='requested'));
-   return json({ok:true,overdue:loans,pending});
+   const requests=[];
+   if(!me.is_admin){
+    const item=(t,kind,label)=>({id:t.id+':'+kind,transactionId:t.id,kind,label,title:detail(t).title||'',gross:t.gross_amount,createdAt:t.created_at});
+    for(const t of pending)requests.push(item(t,'consent',t.kind==='goods'&&t.payee_id===me.id?'판매대금 수령 선택·동의':t.kind==='goods'?'구매 조건 최종 확인':t.kind==='repayment'?'상환 요청 동의':'대여 요청 동의'));
+    for(const a of tables.actions.filter(a=>a.status==='requested'&&a.counterparty_id===me.id)){
+     const t=tables.transactions.find(t=>t.id===a.transaction_id);if(t)requests.push({...item(t,'action',({refund:'환불',cancel:'취소',revise:'조건 변경',resolve:'분쟁 해제'})[a.kind]+' 협의 요청'),actionId:a.id,createdAt:a.created_at});
+    }
+    for(const t of tables.transactions.filter(t=>t.kind==='goods'&&['held','delivery_pending'].includes(t.status)&&(t.requester_id===me.id||t.counterparty_id===me.id))){
+     if(!tables.actions.some(a=>a.transaction_id===t.id&&['requested','consented'].includes(a.status))&&!tables.delivery.some(d=>d.transaction_id===t.id&&d.actor_id===me.id&&d.revision>=(detail(t).delivery_epoch||0)))requests.push(item(t,'delivery','물품 전달·수령 확인'));
+    }
+   }
+   requests.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id));
+   const waiting=!me.is_admin?tables.transactions.filter(t=>(t.requester_id===me.id||t.counterparty_id===me.id)&&!requests.some(r=>r.transactionId===t.id)&&(['requested','consented','held','delivery_pending','disputed'].includes(t.status)||tables.actions.some(a=>a.transaction_id===t.id&&['requested','consented'].includes(a.status)))).map(t=>({transactionId:t.id,kind:t.kind,title:detail(t).title||'',gross:t.gross_amount,status:t.status})):[];
+   return json({ok:true,overdue:loans,pending,requests,waiting});
   }
   if(path==='/approval-queue'&&req.method==='GET'){parent();return json({ok:true,transactions:tables.transactions.filter(t=>t.status==='consented'),actions:tables.actions.filter(a=>a.status==='consented')});}
   if(path==='/quote'&&req.method==='POST'){
