@@ -13,6 +13,9 @@ jobs:
           node-version: '22'
       - name: Check inline JavaScript syntax
         run: node scripts/check-inline-js.mjs
+      - name: Test child transaction domain rules
+        run: |
+          node --test tests/child-transactions/*.test.cjs
       - name: Check Worker syntax
         run: node --check src/worker.js
       - name: Check production allowance UI
