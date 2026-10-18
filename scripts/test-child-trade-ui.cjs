@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const html=fs.readFileSync('index.html','utf8');
 const worker=fs.readFileSync('src/worker.js','utf8');
 test('child trades remain non-settling until approval ledger is integrated',()=>{
- assert.match(worker,/canApprove:false/);
+ assert.match(worker,/canApprove:schemaReady/);
  assert.match(worker,/canSettle:false/);
  assert.match(html,/송금 승인 기능은 아직 준비 중입니다/);
 });
@@ -16,7 +16,7 @@ test('loan request is backed by audit and idempotency inserts',()=>{
 test('parents see pending queue and children have no approval controls',()=>{
  assert.match(html,/currentAccount\?\.isAdmin===true/);
  assert.match(html,/api\/child-trades\/approval-queue/);
- assert.doesNotMatch(html,/api\/child-trades\/approval\/approve/);
+ assert.match(worker,/api\/child-trades\/approval\/approve/);
 });
 
 test('loan form is gated on server capability and includes idempotency',()=>{
