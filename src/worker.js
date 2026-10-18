@@ -54,13 +54,35 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  const b=await body(req);
  if(!["loan","goods"].includes(b.kind))return json({error:"거래 유형을 확인해주세요."},400);
  if(typeof b.counterpartyId!=="string"||!b.counterpartyId||b.counterpartyId===me.id)return json({error:"다른 자녀를 선택해주세요."},400);
- if(!Number.isSafeInteger(b.gross)||b.gross<=0)return json({error:"거래 금액은 양의 정수여야 합니다."},400);
+ if(!Number.isSafeInteger(b.gross)||b.gross<=0||b.gross>10000000)return json({error:"거래 금액을 확인해주세요."},400);
  if(!["free","card","minus"].includes(b.sourceWallet)||!["free","card","minus"].includes(b.destinationWallet))return json({error:"용돈 종류를 확인해주세요."},400);
  if(b.destinationWallet==="minus")return json({error:"마이너스 수령은 변제 정책 연동 후 지원됩니다."},409);
  if(me.is_admin)return json({error:"자녀 계정에서만 거래를 신청할 수 있습니다."},403);
+ if(b.kind==="goods")return json({error:"물품 거래는 예약금 원장 연결 후 신청할 수 있습니다.",code:"CHILD_TRADE_GOODS_DISABLED"},503);
  const counterparty=await env.DB.prepare("SELECT id FROM members WHERE id=? AND family_id=? AND is_admin=0").bind(b.counterpartyId,me.family_id).first();
  if(!counterparty)return json({error:"가족 구성원이 아닌 상대방입니다."},403);
- return json({error:"거래 신청은 아직 활성화되지 않았습니다. 안전한 정산 기능 연결 후 제공됩니다.",code:"CHILD_TRADE_WRITES_DISABLED"},503);
+ const feeRate=(b.sourceWallet==="minus"&&b.destinationWallet==="free")||(b.sourceWallet==="card"&&b.destinationWallet==="free")?0.5:0;
+ const fee=Math.floor(b.gross*feeRate),net=b.gross-fee;
+ if(net<=0)return json({error:"수수료를 제외한 실수령액이 없습니다."},400);
+ const key=typeof b.operationKey==="string"?b.operationKey:"";
+ if(!/^[a-zA-Z0-9_-]{16,100}$/.test(key))return json({error:"중복 방지 요청 키가 필요합니다."},400);
+ if(b.dueDate!==undefined&&b.dueDate!==null&&(!/^\\d{4}-\\d{2}-\\d{2}$/.test(b.dueDate)||!Number.isFinite(Date.parse(b.dueDate+"T00:00:00Z"))))return json({error:"상환기한 형식을 확인해주세요."},400);
+ try{
+  const previous=await env.DB.prepare("SELECT result_json FROM child_trade_idempotency WHERE operation_key=?").bind(me.family_id+":"+me.id+":"+key).first();
+  if(previous)return json(JSON.parse(previous.result_json));
+  const existing=await env.DB.prepare("SELECT COUNT(*) count FROM child_trade_loans l JOIN child_trade_transactions t ON t.id=l.transaction_id WHERE t.family_id=? AND l.borrower_id=? AND l.outstanding_amount>0").bind(me.family_id,me.id).first();
+  if(Number(existing?.count||0)>0)return json({error:"미상환 대여금이 있어 새로 빌릴 수 없습니다."},409);
+  const pending=await env.DB.prepare("SELECT COUNT(*) count FROM child_trade_transactions WHERE family_id=? AND requester_id=? AND kind='loan' AND status IN ('requested','consented','approved')").bind(me.family_id,me.id).first();
+  if(Number(pending?.count||0)>0)return json({error:"진행 중인 대여 신청이 있습니다."},409);
+  const txId=id(),auditId=id(),stamp=new Date().toISOString();
+  const result={ok:true,id:txId,status:"requested",gross:b.gross,fee,net};
+  await env.DB.batch([
+   env.DB.prepare("INSERT INTO child_trade_transactions(id,family_id,kind,requester_id,counterparty_id,payer_id,payee_id,source_wallet,destination_wallet,gross_amount,fee_amount,net_amount,status,revision,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)").bind(txId,me.family_id,"loan",me.id,counterparty.id,counterparty.id,me.id,b.sourceWallet,b.destinationWallet,b.gross,fee,net,"requested",b.dueDate||null,stamp,stamp),
+   env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(auditId,txId,me.id,"request",null,"requested",0,JSON.stringify({gross:b.gross,fee,net}),stamp),
+   env.DB.prepare("INSERT INTO child_trade_idempotency(operation_key,transaction_id,result_json,created_at) VALUES(?,?,?,?)").bind(me.family_id+":"+me.id+":"+key,txId,JSON.stringify(result),stamp)
+  ]);
+  return json(result,201);
+ }catch{return json({error:"거래 원장이 준비되지 않았거나 요청이 중복되었습니다. 새로고침 후 확인해주세요.",code:"CHILD_TRADE_WRITE_UNAVAILABLE"},503)}
 }
 if(url.pathname==="/api/child-trades"&&req.method==="GET"){
  const status=url.searchParams.get("status")||"active",childName=url.searchParams.get("child");
