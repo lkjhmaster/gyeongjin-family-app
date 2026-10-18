@@ -84,6 +84,25 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
   return json(result,201);
  }catch(e){try{const prior=await env.DB.prepare("SELECT result_json FROM child_trade_idempotency WHERE operation_key=?").bind(me.family_id+":"+me.id+":"+key).first();if(prior)return json(JSON.parse(prior.result_json))}catch{}return json({error:"거래 원장이 준비되지 않았거나 요청이 중복되었습니다. 새로고침 후 확인해주세요.",code:"CHILD_TRADE_WRITE_UNAVAILABLE"},503)}
 }
+if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
+ const b=await body(req);
+ if(typeof b.transactionId!=="string"||!b.transactionId||!["consent","reject","cancel"].includes(b.decision))return json({error:"요청 정보를 확인해주세요."},400);
+ try{
+  const tx=await env.DB.prepare("SELECT id,kind,requester_id,counterparty_id,status,revision FROM child_trade_transactions WHERE id=? AND family_id=?").bind(b.transactionId,me.family_id).first();
+  if(!tx)return json({error:"거래를 찾을 수 없습니다."},404);
+  if(tx.kind!=="loan")return json({error:"대여 거래만 처리할 수 있습니다."},409);
+  if(b.decision==="consent"&&me.id!==tx.counterparty_id)return json({error:"대여 상대방만 동의할 수 있습니다."},403);
+  if(b.decision==="cancel"&&me.id!==tx.requester_id)return json({error:"신청자만 취소할 수 있습니다."},403);
+  if(b.decision==="reject"&&me.id!==tx.counterparty_id&&!me.is_admin)return json({error:"상대방 또는 부모만 거절할 수 있습니다."},403);
+  if(tx.status!=="requested")return json({error:"이미 처리된 신청입니다.",status:tx.status},409);
+  const next=b.decision==="consent"?"consented":b.decision==="cancel"?"cancelled":"rejected";
+  const now=new Date().toISOString();
+  const result=await env.DB.prepare("UPDATE child_trade_transactions SET status=?,revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status='requested' AND revision=?").bind(next,now,tx.id,me.family_id,tx.revision).run();
+  if(result.meta?.changes!==1)return json({error:"다른 사용자가 먼저 처리했습니다. 새로고침해주세요."},409);
+  await env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id(),tx.id,me.id,b.decision,"requested",next,tx.revision+1,null,now).run();
+  return json({ok:true,id:tx.id,status:next});
+ }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
+}
 if(url.pathname==="/api/child-trades"&&req.method==="GET"){
  const status=url.searchParams.get("status")||"active",childName=url.searchParams.get("child");
  if(!["active","completed","cancelled"].includes(status))return json({error:"잘못된 조회 상태입니다."},400);
