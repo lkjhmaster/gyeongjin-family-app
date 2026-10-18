@@ -99,7 +99,12 @@ if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
   const now=new Date().toISOString();
   const result=await env.DB.prepare("UPDATE child_trade_transactions SET status=?,revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status='requested' AND revision=?").bind(next,now,tx.id,me.family_id,tx.revision).run();
   if(result.meta?.changes!==1)return json({error:"다른 사용자가 먼저 처리했습니다. 새로고침해주세요."},409);
-  await env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id(),tx.id,me.id,b.decision,"requested",next,tx.revision+1,null,now).run();
+  try{
+   await env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id(),tx.id,me.id,b.decision,"requested",next,tx.revision+1,null,now).run();
+  }catch{
+   await env.DB.prepare("UPDATE child_trade_transactions SET status='requested',revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status=? AND revision=?").bind(new Date().toISOString(),tx.id,me.family_id,next,tx.revision+1).run();
+   return json({error:"감사기록 저장에 실패했습니다. 거래 상태를 다시 확인해주세요."},503);
+  }
   return json({ok:true,id:tx.id,status:next});
  }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
