@@ -109,6 +109,23 @@ if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
   return json({ok:true,id:tx.id,status:next});
  }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
+if(url.pathname==="/api/child-trades/approval/reject"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"부모 관리자만 거절할 수 있습니다."},403);
+ const b=await body(req);
+ if(typeof b.transactionId!=="string"||!b.transactionId)return json({error:"거래번호가 필요합니다."},400);
+ try{
+  const tx=await env.DB.prepare("SELECT id,status,revision FROM child_trade_transactions WHERE id=? AND family_id=? AND kind='loan'").bind(b.transactionId,me.family_id).first();
+  if(!tx)return json({error:"거래를 찾을 수 없습니다."},404);
+  if(tx.status!=="consented")return json({error:"부모 심사 대기 상태가 아닙니다."},409);
+  const now=new Date().toISOString();
+  const results=await env.DB.batch([
+   env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) SELECT ?,id,?,?,?,?,?,?,? FROM child_trade_transactions WHERE id=? AND family_id=? AND status='consented' AND revision=?").bind(id(),me.id,"reject","consented","rejected",tx.revision+1,null,now,tx.id,me.family_id,tx.revision),
+   env.DB.prepare("UPDATE child_trade_transactions SET status='rejected',revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status='consented' AND revision=?").bind(now,tx.id,me.family_id,tx.revision)
+  ]);
+  if(results[1]?.meta?.changes!==1)return json({error:"이미 처리된 거래입니다."},409);
+  return json({ok:true,id:tx.id,status:"rejected"});
+ }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
+}
 if(url.pathname==="/api/child-trades/approval-queue"&&req.method==="GET"){
  if(!me.is_admin)return json({error:"부모 관리자만 승인대기를 조회할 수 있습니다."},403);
  try{
