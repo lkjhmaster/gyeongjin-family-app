@@ -34,6 +34,19 @@ if(url.pathname==="/api/setup-status"&&req.method==="GET"){const row=await env.D
 if(url.pathname==="/api/setup"&&req.method==="POST"){const b=await body(req);if(!b.familyName||!b.parentName||!b.password||b.password.length<4)return json({error:"가족명, 부모 이름, 4자 이상 비밀번호가 필요합니다."},400);const exists=await env.DB.prepare("SELECT COUNT(*) c FROM families").first();if(Number(exists?.c||0)>0)return json({error:"초기 가족 설정이 이미 완료되었습니다."},409);const familyId=id(),memberId=id(),salt=id(),hash=await passwordHash(b.password,salt);await env.DB.batch([env.DB.prepare("INSERT INTO families(id,name) VALUES(?,?)").bind(familyId,b.familyName),env.DB.prepare("INSERT INTO members(id,family_id,name,role,is_admin,emoji,password_hash,password_salt) VALUES(?,?,?,?,1,?,?,?)").bind(memberId,familyId,b.parentName,"parent",b.emoji||"🙂",hash,salt)]);const token=await createSession(memberId,env);return json({token,member:{id:memberId,name:b.parentName,role:"parent",isAdmin:true,emoji:b.emoji||"🙂"}})}
 if(url.pathname==="/api/login"&&req.method==="POST"){const b=await body(req);const m=await env.DB.prepare("SELECT * FROM members WHERE name=? LIMIT 1").bind(b.name||"").first();if(!m||await passwordHash(b.password||"",m.password_salt)!==m.password_hash)return json({error:"이름 또는 비밀번호를 확인해주세요."},401);const token=await createSession(m.id,env);return json({token,member:{id:m.id,name:m.name,role:m.role,isAdmin:!!m.is_admin,emoji:m.emoji}})}
 const me=await auth(req,env);if(!me)return json({error:"로그인이 필요합니다."},401);
+if(url.pathname==="/api/child-trades/summary"&&req.method==="GET"){
+ const childName=url.searchParams.get("child");
+ if(!childName||childName.length>80)return json({error:"조회할 자녀를 지정해주세요."},400);
+ const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,childName).first();
+ if(!child)return json({error:"조회할 자녀를 찾을 수 없습니다."},404);
+ if(!me.is_admin&&child.id!==me.id)return json({error:"다른 자녀의 채권·채무는 조회할 수 없습니다."},403);
+ try{
+  const row=await env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN l.borrower_id=? THEN l.outstanding_amount ELSE 0 END),0) borrowed,COALESCE(SUM(CASE WHEN l.lender_id=? THEN l.outstanding_amount ELSE 0 END),0) lent FROM child_trade_loans l JOIN child_trade_transactions t ON t.id=l.transaction_id WHERE t.family_id=? AND l.outstanding_amount>0 AND l.status IN ('active','disputed')").bind(child.id,child.id,me.family_id).first();
+  const borrowed=Number(row?.borrowed||0),lent=Number(row?.lent||0);
+  if(!Number.isSafeInteger(borrowed)||!Number.isSafeInteger(lent)||borrowed<0||lent<0)throw Error("invalid totals");
+  return json({ok:true,borrowed,lent});
+ }catch{return json({error:"채권·채무 원장 준비 중",code:"CHILD_TRADES_UNAVAILABLE"},503)}
+}
 if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  const b=await body(req);
  if(!["loan","goods"].includes(b.kind))return json({error:"거래 유형을 확인해주세요."},400);
