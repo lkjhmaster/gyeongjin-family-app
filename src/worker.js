@@ -47,6 +47,9 @@ if(url.pathname==="/api/child-trades/summary"&&req.method==="GET"){
   return json({ok:true,borrowed,lent});
  }catch{return json({error:"채권·채무 원장 준비 중",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
+if(url.pathname==="/api/child-trades/capabilities"&&req.method==="GET"){
+ return json({ok:true,readOnly:true,canRequest:false,canApprove:false,canSettle:false,canRepay:false,canRefund:false,requiresMigration:true});
+}
 if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  const b=await body(req);
  if(!["loan","goods"].includes(b.kind))return json({error:"거래 유형을 확인해주세요."},400);
