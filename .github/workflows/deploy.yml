@@ -26,6 +26,10 @@ jobs:
         run: |
           node scripts/check-inline-js.mjs
           node --check src/worker.js
+          node --test tests/child-transactions/*.test.cjs
+          node --test scripts/test-child-trade-list.cjs
+          node --test scripts/test-child-trade-request.cjs
+          node --test scripts/test-child-trade-ui.cjs
           node scripts/check-production-allowance.mjs
           node --test scripts/test-repayment.mjs
           node scripts/check-split-payment.mjs
