@@ -74,7 +74,12 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  if(b.dueDate!==undefined&&b.dueDate!==null&&(!/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)||!Number.isFinite(Date.parse(b.dueDate+"T00:00:00Z"))))return json({error:"상환기한 형식을 확인해주세요."},400);
  try{
   const previous=await env.DB.prepare("SELECT result_json FROM child_trade_idempotency WHERE operation_key=?").bind(me.family_id+":"+me.id+":"+key).first();
-  if(previous)return json(JSON.parse(previous.result_json));
+  if(previous){
+   const prior=JSON.parse(previous.result_json);
+   const original=await env.DB.prepare("SELECT counterparty_id,source_wallet,destination_wallet,gross_amount,due_date FROM child_trade_transactions WHERE id=? AND family_id=? AND requester_id=?").bind(prior.id,me.family_id,me.id).first();
+   if(!original||original.counterparty_id!==counterparty.id||original.source_wallet!==b.sourceWallet||original.destination_wallet!==b.destinationWallet||Number(original.gross_amount)!==b.gross||(original.due_date||null)!==(b.dueDate||null))return json({error:"같은 요청 키로 다른 거래를 신청할 수 없습니다."},409);
+   return json(prior);
+  }
   const existing=await env.DB.prepare("SELECT COUNT(*) count FROM child_trade_loans l JOIN child_trade_transactions t ON t.id=l.transaction_id WHERE t.family_id=? AND l.borrower_id=? AND l.outstanding_amount>0").bind(me.family_id,me.id).first();
   if(Number(existing?.count||0)>0)return json({error:"미상환 대여금이 있어 새로 빌릴 수 없습니다."},409);
   const pending=await env.DB.prepare("SELECT COUNT(*) count FROM child_trade_transactions WHERE family_id=? AND requester_id=? AND kind='loan' AND status IN ('requested','consented','approved')").bind(me.family_id,me.id).first();
