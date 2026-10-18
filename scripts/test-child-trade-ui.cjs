@@ -18,3 +18,10 @@ test('parents see pending queue and children have no approval controls',()=>{
  assert.match(html,/api\/child-trades\/approval-queue/);
  assert.doesNotMatch(html,/api\/child-trades\/approval\/approve/);
 });
+
+test('loan form is gated on server capability and includes idempotency',()=>{
+ assert.match(html,/capability\?\.canRequest/);
+ assert.match(html,/childTradeSubmitButton/);
+ assert.match(html,/operationKey:button\.dataset\.key/);
+ assert.match(worker,/api\/child-trades\/participants/);
+});
