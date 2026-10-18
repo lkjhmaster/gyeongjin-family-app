@@ -119,6 +119,56 @@ if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
   return json({ok:true,id:tx.id,status:next});
  }catch{return json({error:"거래 원장을 확인할 수 없습니다.",code:"CHILD_TRADES_UNAVAILABLE"},503)}
 }
+if(url.pathname==="/api/child-trades/approval/approve"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"부모 관리자만 승인할 수 있습니다."},403);
+ const b=await body(req);
+ if(typeof b.transactionId!=="string"||!b.transactionId)return json({error:"거래번호가 필요합니다."},400);
+ try{
+  const tx=await env.DB.prepare("SELECT id,requester_id,counterparty_id,source_wallet,destination_wallet,gross_amount,fee_amount,net_amount,due_date,status,revision FROM child_trade_transactions WHERE id=? AND family_id=? AND kind='loan'").bind(b.transactionId,me.family_id).first();
+  if(!tx)return json({error:"거래를 찾을 수 없습니다."},404);
+  if(tx.status!=="consented")return json({error:"부모 승인대기 상태가 아닙니다."},409);
+  if(!["free","card","minus"].includes(tx.source_wallet)||!["free","card"].includes(tx.destination_wallet)||!Number.isSafeInteger(tx.gross_amount)||!Number.isSafeInteger(tx.net_amount)||tx.gross_amount<=0||tx.net_amount<=0||tx.gross_amount!==tx.fee_amount+tx.net_amount)return json({error:"거래 금액을 검증할 수 없습니다."},409);
+  const borrower=await env.DB.prepare("SELECT name FROM members WHERE id=? AND family_id=? AND is_admin=0").bind(tx.requester_id,me.family_id).first();
+  const lender=await env.DB.prepare("SELECT name FROM members WHERE id=? AND family_id=? AND is_admin=0").bind(tx.counterparty_id,me.family_id).first();
+  if(!borrower||!lender||borrower.name===lender.name)return json({error:"거래 당사자를 확인할 수 없습니다."},409);
+  const debt=await env.DB.prepare("SELECT COUNT(*) count FROM child_trade_loans l JOIN child_trade_transactions t ON t.id=l.transaction_id WHERE t.family_id=? AND l.borrower_id=? AND l.outstanding_amount>0").bind(me.family_id,tx.requester_id).first();
+  if(Number(debt?.count||0)>0)return json({error:"미상환 대여금이 있어 승인할 수 없습니다."},409);
+  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+  if(!state)return json({error:"용돈 원장을 찾을 수 없습니다."},409);
+  let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"용돈 원장 형식 오류"},409)}
+  if(!ledger||typeof ledger!=="object"||Array.isArray(ledger))return json({error:"용돈 원장 형식 오류"},409);
+  const lenderRows=Array.isArray(ledger[lender.name])?ledger[lender.name]:[],borrowerRows=Array.isArray(ledger[borrower.name])?ledger[borrower.name]:[];
+  const approved=lenderRows.filter(x=>(x.status||"approved")==="approved");
+  const balance=approved.filter(x=>x.wallet===tx.source_wallet).reduce((sum,x)=>sum+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
+  let available=balance;
+  if(tx.source_wallet==="minus"){
+   const limitState=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_limits'").bind(me.family_id).first();
+   let limits;try{limits=JSON.parse(limitState?.value_json||"{}")}catch{return json({error:"마이너스 한도 오류"},409)}
+   const limit=Number(limits?.[lender.name]||0);
+   if(!Number.isSafeInteger(limit)||limit<0)return json({error:"마이너스 한도 오류"},409);
+   available=Math.max(0,limit+balance);
+  }
+  if(!Number.isSafeInteger(available)||available<tx.gross_amount)return json({error:"대여자 용돈 잔액이 부족합니다."},409);
+  const now=new Date().toISOString(),day=new Date(Date.now()+32400000).toISOString().slice(0,10),loanId=id(),debitId=id(),creditId=id(),feeId=id(),auditId=id(),approvalId=id();
+  lenderRows.push({id:debitId,childTradeId:tx.id,date:day,type:"expense",wallet:tx.source_wallet,amount:tx.gross_amount,debtOrigin:tx.source_wallet==="minus"?tx.destination_wallet:"",title:"자녀 간 대여",status:"approved",requestedBy:borrower.name,approvedBy:me.name,createdAt:now,approvedAt:now});
+  borrowerRows.push({id:creditId,childTradeId:tx.id,date:day,type:"income",wallet:tx.destination_wallet,amount:tx.net_amount,title:"자녀 간 차입",status:"approved",requestedBy:borrower.name,approvedBy:me.name,createdAt:now,approvedAt:now});
+  ledger[lender.name]=lenderRows;ledger[borrower.name]=borrowerRows;
+  const nextJson=JSON.stringify(ledger);
+  const statements=[
+   env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=? AND EXISTS(SELECT 1 FROM child_trade_transactions WHERE id=? AND family_id=? AND status='consented' AND revision=?)").bind(nextJson,me.id,me.family_id,state.value_json,tx.id,me.family_id,tx.revision),
+   env.DB.prepare("INSERT INTO child_trade_loans(id,transaction_id,borrower_id,lender_id,principal_amount,outstanding_amount,due_date,status) SELECT ?,?,?,?,?,?,?,'active' WHERE EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?) AND EXISTS(SELECT 1 FROM child_trade_transactions WHERE id=? AND family_id=? AND status='consented' AND revision=?)").bind(loanId,tx.id,tx.requester_id,tx.counterparty_id,tx.net_amount,tx.net_amount,tx.due_date,me.family_id,nextJson,tx.id,me.family_id,tx.revision),
+   env.DB.prepare("INSERT INTO child_trade_postings(id,transaction_id,owner_id,wallet,amount,kind,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(debitId,tx.id,tx.counterparty_id,tx.source_wallet,-tx.gross_amount,"debit",now,loanId),
+   env.DB.prepare("INSERT INTO child_trade_postings(id,transaction_id,owner_id,wallet,amount,kind,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(creditId,tx.id,tx.requester_id,tx.destination_wallet,tx.net_amount,"credit",now,loanId),
+   env.DB.prepare("INSERT INTO child_trade_audit(id,transaction_id,actor_id,action,previous_state,next_state,revision,payload_json,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(auditId,tx.id,me.id,"approve","consented","active",tx.revision+1,JSON.stringify({gross:tx.gross_amount,fee:tx.fee_amount,net:tx.net_amount}),now,loanId),
+   env.DB.prepare("UPDATE child_trade_transactions SET status='active',revision=revision+1,updated_at=? WHERE id=? AND family_id=? AND status='consented' AND revision=? AND EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(now,tx.id,me.family_id,tx.revision,loanId),
+   env.DB.prepare("INSERT INTO child_trade_approvals(id,transaction_id,revision,actor_id,actor_role,decision,created_at) SELECT ?,?,? ,?,'parent','approve',? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(approvalId,tx.id,tx.revision+1,me.id,now,loanId)
+  ];
+  if(tx.fee_amount>0)statements.splice(4,0,env.DB.prepare("INSERT INTO child_trade_postings(id,transaction_id,owner_id,wallet,amount,kind,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM child_trade_loans WHERE id=?)").bind(feeId,tx.id,tx.counterparty_id,tx.source_wallet,tx.fee_amount,"fee",now,loanId));
+  const results=await env.DB.batch(statements);
+  if(results.some(x=>x?.meta?.changes!==1))return json({error:"거래가 다른 요청과 충돌했습니다. 거래 내역을 다시 확인해주세요."},409);
+  return json({ok:true,id:tx.id,status:"active",principal:tx.net_amount});
+ }catch{return json({error:"대여 승인 정산을 완료하지 못했습니다. 거래 내역을 확인해주세요."},503)}
+}
 if(url.pathname==="/api/child-trades/approval/reject"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"부모 관리자만 거절할 수 있습니다."},403);
  const b=await body(req);
