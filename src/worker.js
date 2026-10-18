@@ -71,7 +71,7 @@ if(url.pathname==="/api/child-trades"&&req.method==="POST"){
  if(net<=0)return json({error:"수수료를 제외한 실수령액이 없습니다."},400);
  const key=typeof b.operationKey==="string"?b.operationKey:"";
  if(!/^[a-zA-Z0-9_-]{16,100}$/.test(key))return json({error:"중복 방지 요청 키가 필요합니다."},400);
- if(b.dueDate!==undefined&&b.dueDate!==null&&(!/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)||!Number.isFinite(Date.parse(b.dueDate+"T00:00:00Z"))))return json({error:"상환기한 형식을 확인해주세요."},400);
+ if(b.dueDate!==undefined&&b.dueDate!==null&&(!/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)||new Date(b.dueDate+"T00:00:00Z").toISOString().slice(0,10)!==b.dueDate))return json({error:"상환기한 형식을 확인해주세요."},400);
  try{
   const previous=await env.DB.prepare("SELECT result_json FROM child_trade_idempotency WHERE operation_key=?").bind(me.family_id+":"+me.id+":"+key).first();
   if(previous){
