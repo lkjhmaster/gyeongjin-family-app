@@ -5,7 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/worker.js';
 export async function fixture(){
  const sql=new DatabaseSync(':memory:');sql.exec(fs.readFileSync('schema.sql','utf8'));
- for(const p of ['0001_additive_schema.sql','0002_atomic_lifecycle.sql'])sql.exec(fs.readFileSync('migrations/child-trades/'+p,'utf8'));
+ for(const p of ['0001_additive_schema.sql','0002_atomic_lifecycle.sql','0003_split_funding.sql'])sql.exec(fs.readFileSync('migrations/child-trades/'+p,'utf8'));
  sql.prepare('INSERT INTO families(id,name) VALUES(?,?)').run('f','family');
  for(const [id,name,role] of [['a','Alice','child'],['b','Bob','child'],['c','Cara','child'],['p','Parent','parent']]){
   sql.prepare('INSERT INTO members(id,family_id,name,role,is_admin,password_hash,password_salt) VALUES(?,?,?,?,?,?,?)').run(id,'f',name,role,role==='parent'?1:0,'hash','salt');

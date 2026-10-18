@@ -50,6 +50,7 @@ jobs:
         run: |
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0001_additive_schema.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0002_atomic_lifecycle.sql
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0003_split_funding.sql
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
