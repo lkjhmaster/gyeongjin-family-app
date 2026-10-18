@@ -94,6 +94,7 @@ if(url.pathname==="/api/child-trades/decision"&&req.method==="POST"){
   if(b.decision==="consent"&&me.id!==tx.counterparty_id)return json({error:"대여 상대방만 동의할 수 있습니다."},403);
   if(b.decision==="cancel"&&me.id!==tx.requester_id)return json({error:"신청자만 취소할 수 있습니다."},403);
   if(b.decision==="reject"&&me.id!==tx.counterparty_id&&!me.is_admin)return json({error:"상대방 또는 부모만 거절할 수 있습니다."},403);
+  if(me.is_admin&&b.decision!=="reject")return json({error:"부모는 동의나 신청 취소를 대신할 수 없습니다."},403);
   if(tx.status!=="requested")return json({error:"이미 처리된 신청입니다.",status:tx.status},409);
   const next=b.decision==="consent"?"consented":b.decision==="cancel"?"cancelled":"rejected";
   const now=new Date().toISOString();
