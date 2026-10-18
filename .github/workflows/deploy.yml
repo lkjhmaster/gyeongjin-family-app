@@ -81,3 +81,5 @@ jobs:
           curl --fail --silent --show-error --retry 3 --retry-delay 2 'https://gyeongjin-family-app.muse-hooni.workers.dev/' -o /tmp/family-app.html
           grep -q 'minus_repayment' /tmp/family-app.html
           grep -q '통합결제' /tmp/family-app.html
+          grep -q 'childTradeParentApprove' /tmp/family-app.html
+          grep -q 'childTradeSubmit' /tmp/family-app.html
