@@ -21,3 +21,5 @@ test('goods trades remain disabled before hold accounting is implemented',async(
 test('destination minus is blocked until repayment accounting is implemented',async()=>{const h=harness({id:'borrower',family_id:'family',is_admin:0});const r=await post(h,{...request,destinationWallet:'minus'});assert.equal(r.status,409);assert.equal(h.calls.some(x=>x.batch),false)});
 
 test('reused request key with changed terms is rejected',async()=>{const h=harness({id:'borrower',family_id:'family',is_admin:0});assert.equal((await post(h,request)).status,201);const changed=await post(h,{...request,gross:2000});assert.equal(changed.status,409);assert.equal(h.calls.filter(x=>x.batch).length,1)});
+
+test('impossible due date is rejected without ledger writes',async()=>{const h=harness({id:'borrower',family_id:'family',is_admin:0});const r=await post(h,{...request,dueDate:'2026-02-30'});assert.equal(r.status,400);assert.equal(h.calls.some(x=>x.batch),false)});
