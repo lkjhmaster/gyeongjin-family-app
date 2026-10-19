@@ -29,6 +29,7 @@ jobs:
           node --test scripts/test-child-trade-list.cjs
           node --test scripts/test-child-trade-lifecycle.mjs
           node --test scripts/test-child-trade-ui.cjs
+          node --test scripts/test-daily-chore-reward.cjs
           python3 scripts/test-child-trade-schema.py
           node scripts/check-production-allowance.mjs
           node --test scripts/test-repayment.mjs
