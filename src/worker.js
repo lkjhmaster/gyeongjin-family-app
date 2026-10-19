@@ -248,7 +248,7 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  requests[key]={...request,status:b.decision==="approve"?"approved":"rejected",reviewedBy:me.name};
  const nextRequests=JSON.stringify(requests),ops=[env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?) AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chores' AND value_json=?)").bind(nextRequests,me.family_id,saved[0].value_json,me.family_id,saved[2].value_json,me.family_id,saved[1].value_json)];
  if(b.decision==="approve")ops.push(env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?)").bind(JSON.stringify(ledger),me.family_id,saved[2].value_json,me.family_id,nextRequests));
- const result=await env.DB.batch(ops);if(result.some(x=>x.meta?.changes!==1))return json({error:"동시 변경 충돌"},409);
+ const guarded=ops.flatMap(op=>[op,env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END")]);try{await env.DB.batch(guarded)}catch{return json({error:"동시 변경 충돌: 지급 없이 종료했습니다."},409)}
  return json({ok:true,status:requests[key].status});
 }
 if(url.pathname==="/api/state"&&req.method==="GET"){const rows=await env.DB.prepare("SELECT state_key,value_json,updated_at FROM family_state WHERE family_id=?").bind(me.family_id).all();const state={};for(const r of rows.results||[]){try{state[r.state_key]=JSON.parse(r.value_json)}catch{}}return json({state})}
