@@ -210,6 +210,19 @@ if(url.pathname==="/api/chores/exemption/review"&&req.method==="POST"){
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,state:item.dayRecords[b.date].state});
 }
+if(url.pathname==="/api/chores/legacy/reverse"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"관리자 전용"},403);
+ const b=await body(req),reason=String(b.reason||"").trim();if(typeof b.name!=="string"||typeof b.id!=="string"||reason.length<2||reason.length>500)return json({error:"입력 오류"},400);
+ const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();if(!state)return json({error:"원장 없음"},404);
+ let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 오류"},500)}
+ const rows=ledger[b.name];if(!Array.isArray(rows))return json({error:"거래 없음"},404);
+ const original=rows.find(x=>x.id===b.id);if(!original||original.status!=="approved"||original.type!=="income"||original.wallet!=="free"||original.di?.action==="daily_chore_reward"||original.di?.action==="daily_chore_reward_reversal"||!/(할\s*일|chore)/i.test(String(original.title||"")+" "+String(original.di?.action||"")))return json({error:"과거 할 일 보상으로 확인되지 않은 거래입니다."},409);
+ const amount=Number(original.amount);if(!Number.isSafeInteger(amount)||amount<=0)return json({error:"지급 금액 오류"},409);
+ const reversalId="legacy_chore_reversal|"+b.id;if(rows.some(x=>x.id===reversalId||x.di?.reverses===b.id))return json({error:"이미 취소한 보상입니다."},409);
+ const at=new Date().toISOString();rows.push({id:reversalId,date:at.slice(0,10),type:"expense",wallet:"free",amount,title:String(original.date||"")+" 과거 할 일 오지급 정정",status:"approved",requestedBy:me.name,approvedBy:me.name,createdAt:at,di:{action:"legacy_chore_reward_reversal",reverses:b.id,reason,originalAmount:amount}});
+ const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
+ return json({ok:true,amount,reversalId});
+}
 if(url.pathname==="/api/chores/daily/reverse"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),key=String(b.name||"")+"|"+String(b.date||""),reason=String(b.reason||"").trim();
