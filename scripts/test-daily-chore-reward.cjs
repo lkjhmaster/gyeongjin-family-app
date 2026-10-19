@@ -7,3 +7,5 @@ test('daily chore reward is all-or-nothing',()=>{assert.match(html,/function cho
 test('daily reward is parent-only and paid through server',()=>{assert.match(worker,/api\/chores\/daily\/review/);assert.match(worker,/if\(!me\.is_admin\)/);assert.match(html,/api\/chores\/daily\/review/);assert.match(worker,/daily_chore_reward/);assert.match(worker,/일일 할 일 보상은 부모 승인 API에서만/)});
 test('old per-item payment path is disabled',()=>{assert.match(html,/개별 할 일 보상 지급이 비활성화되었습니다/);assert.doesNotMatch(html,/await creditChoreReward\(/)});
 test('daily requests sync and approvals are grouped',()=>{assert.match(html,/chore_daily_requests:'gyeongjin_chore_daily_requests'/);assert.match(html,/할 일 완료 요청/);assert.match(html,/choreDailyDetail/);assert.match(worker,/chore_daily_requests/)});
+
+test('pending exemptions are visible before daily reward submission',()=>{assert.match(html,/const exemptionRows=/);assert.match(html,/exemptionRows\.length/);assert.match(html,/exempt_requested/)});
