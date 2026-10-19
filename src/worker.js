@@ -105,6 +105,43 @@ if(url.pathname==="/api/allowance/minus-repayment/cancel"&&req.method==="POST"){
  }
  return json({error:"동시 변경으로 취소하지 못했습니다. 다시 시도해주세요."},409);
 }
+if(url.pathname==="/api/allowance/minus-transfer/review"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"부모 관리자만 승인할 수 있습니다."},403);
+ const b=await body(req);
+ if(typeof b.child!=="string"||typeof b.id!=="string"||!["approve","reject"].includes(b.action))return json({error:"요청 형식 오류"},400);
+ const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=?").bind(me.family_id,b.child).first();
+ if(!child)return json({error:"가족 구성원을 찾을 수 없습니다."},404);
+ for(let attempt=0;attempt<5;attempt++){
+  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+  if(!state)return json({error:"용돈 원장을 찾을 수 없습니다."},404);
+  let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 데이터 오류"},500)}
+  const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[],tx=rows.find(x=>x.id===b.id);
+  if(!tx)return json({error:"요청을 찾을 수 없습니다."},404);
+  if(tx.type!=="minus_transfer")return json({error:"이동 요청이 아닙니다."},400);
+  if(tx.status!=="pending")return json({error:"이미 처리된 요청입니다."},409);
+  const amount=tx.amount,destination=tx.destination;
+  if(!Number.isSafeInteger(amount)||amount<=0||!["free","card"].includes(destination))return json({error:"이동 금액 또는 목적지 오류"},400);
+  const net=destination==="free"?Math.floor(amount/2):amount,fee=amount-net;
+  if(tx.net!==net||tx.fee!==fee)return json({error:"요청 수수료 검증 실패. 요청을 다시 확인해주세요."},409);
+  if(b.action==="approve"){
+   const limits=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_limits'").bind(me.family_id).first();
+   let parsed={};try{parsed=JSON.parse(limits?.value_json||"{}")}catch{return json({error:"마이너스 한도 데이터 오류"},500)}
+   const limit=Number(parsed[b.child]||0);
+   if(!Number.isSafeInteger(limit)||limit<0)return json({error:"마이너스 한도 오류"},409);
+   const approved=rows.filter(x=>x.status==="approved"||(!x.status&&["income","expense"].includes(x.type)));
+   const used=approved.filter(x=>x.wallet==="minus").reduce((n,x)=>n+(x.type==="expense"?Number(x.amount||0):x.type==="income"?-Number(x.amount||0):0),0);
+   if(amount>Math.max(0,limit-Math.max(0,used)))return json({error:"마이너스 가용 한도가 부족합니다."},409);
+   const stamp=new Date().toISOString(),settlementId=id(),base={date:tx.date,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,transferRequestId:tx.id};
+   rows.push({...base,id:settlementId+":debit",type:"expense",wallet:"minus",amount,debtOrigin:destination,title:"마이너스 이동 출금"});
+   rows.push({...base,id:settlementId+":credit",type:"income",wallet:destination,amount:net,title:"마이너스 이동 입금"});
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;tx.settlementId=settlementId;
+  }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedAt=new Date().toISOString()}
+  ledger[b.child]=rows;
+  const updated=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
+  if(updated.meta?.changes===1)return json({ok:true,ledger});
+ }
+ return json({error:"동시 변경 충돌. 다시 시도해주세요."},409);
+}
 if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"부모 관리자만 처리할 수 있습니다."},403);
  const b=await body(req);if(typeof b.child!=="string"||typeof b.id!=="string"||!["approve","reject"].includes(b.action))return json({error:"요청 형식이 올바르지 않습니다."},400);
