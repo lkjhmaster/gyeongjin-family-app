@@ -13,3 +13,5 @@ test('pending exemptions are visible before daily reward submission',()=>{assert
 test('exemption reviews require a parent and use CAS',()=>{assert.match(worker,/api\/chores\/exemption\/review/);assert.match(html,/api\/chores\/exemption\/review/);assert.match(worker,/면제 요청 없음/);assert.match(worker,/동시 수정 충돌/)});
 
 test('daily estimated reward is prominently displayed',()=>{assert.match(html,/오늘의 예상 일일 보상/);assert.match(html,/chore-reward-preview/);assert.match(html,/부모 승인 후 확정/)});
+
+test('parent can reverse approved daily payout without deleting original entry',()=>{assert.match(worker,/api\/chores\/daily\/reverse/);assert.match(worker,/daily_chore_reward_reversal/);assert.match(worker,/reversalReason/);assert.match(worker,/abs\(-9223372036854775808\)/);assert.match(html,/reverseChoreDay/);assert.match(html,/할 일 보상 승인 이력/);assert.match(html,/잘못 승인했어요/)});
