@@ -9,3 +9,5 @@ test('old per-item payment path is disabled',()=>{assert.match(html,/개별 할 
 test('daily requests sync and approvals are grouped',()=>{assert.match(html,/chore_daily_requests:'gyeongjin_chore_daily_requests'/);assert.match(html,/할 일 완료 요청/);assert.match(html,/choreDailyDetail/);assert.match(worker,/chore_daily_requests/)});
 
 test('pending exemptions are visible before daily reward submission',()=>{assert.match(html,/const exemptionRows=/);assert.match(html,/exemptionRows\.length/);assert.match(html,/exempt_requested/)});
+
+test('exemption reviews require a parent and use CAS',()=>{assert.match(worker,/api\/chores\/exemption\/review/);assert.match(html,/api\/chores\/exemption\/review/);assert.match(worker,/면제 요청 없음/);assert.match(worker,/동시 수정 충돌/)});
