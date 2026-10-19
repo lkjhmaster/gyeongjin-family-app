@@ -23,6 +23,7 @@ jobs:
       - name: Verify child trade UI safeguards
         run: |
           node --test scripts/test-child-trade-ui.cjs
+          node --test scripts/test-daily-chore-reward.cjs
           node --check src/child-transactions/lifecycle.js
       - name: Verify D1 schema and pending loan uniqueness
         run: python3 scripts/test-child-trade-schema.py
