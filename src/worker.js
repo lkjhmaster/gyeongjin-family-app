@@ -105,6 +105,30 @@ if(url.pathname==="/api/allowance/minus-repayment/cancel"&&req.method==="POST"){
  }
  return json({error:"동시 변경으로 취소하지 못했습니다. 다시 시도해주세요."},409);
 }
+if(url.pathname==="/api/allowance/minus-transfer/cancel"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"부모 관리자만 취소할 수 있습니다."},403);
+ const b=await body(req);if(typeof b.child!=="string"||typeof b.id!=="string")return json({error:"요청 형식 오류"},400);
+ for(let attempt=0;attempt<5;attempt++){
+  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+  if(!state)return json({error:"원장을 찾을 수 없습니다."},404);
+  let ledger;try{ledger=JSON.parse(state.value_json)}catch{return json({error:"원장 데이터 오류"},500)}
+  const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[],tx=rows.find(x=>x.id===b.id&&x.type==="minus_transfer");
+  if(!tx)return json({error:"이동 거래를 찾을 수 없습니다."},404);
+  if(tx.status!=="approved"||!tx.settlementId)return json({error:"취소할 승인 거래가 아닙니다."},409);
+  const linked=rows.filter(x=>x.settlementId===tx.settlementId&&x.transferRequestId===tx.id);
+  if(linked.length!==2||linked.some(x=>x.status!=="approved")||!linked.some(x=>x.type==="expense"&&x.wallet==="minus")||!linked.some(x=>x.type==="income"&&x.wallet===tx.destination))return json({error:"연결 정산 내역 불일치"},409);
+  const later=rows.filter(x=>x.status==="approved"&&x.wallet===tx.destination&&x.type!=="minus_transfer");
+  const balance=later.reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
+  if(balance<Number(tx.net))return json({error:"받은 용돈의 잔액이 부족해 취소할 수 없습니다."},409);
+  const debt=linked.find(x=>x.wallet==="minus"),repaid=rows.filter(x=>x.status==="approved"&&x.repaymentDebtId===debt.id).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
+  if(repaid>0)return json({error:"이동으로 생성된 채무에 변제 이력이 있어 취소할 수 없습니다."},409);
+  const stamp=new Date().toISOString();
+  for(const x of [tx,...linked]){x.status="cancelled";x.cancelledAt=stamp;x.cancelledBy=me.name;x.cancellationReason="관리자 이동 취소"}
+  const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
+  if(update.meta?.changes===1)return json({ok:true,ledger});
+ }
+ return json({error:"동시 변경 충돌"},409);
+}
 if(url.pathname==="/api/allowance/minus-transfer/review"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"부모 관리자만 승인할 수 있습니다."},403);
  const b=await body(req);
