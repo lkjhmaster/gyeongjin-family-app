@@ -17,3 +17,5 @@ test('daily estimated reward is prominently displayed',()=>{assert.match(html,/�
 test('parent can reverse approved daily payout without deleting original entry',()=>{assert.match(worker,/api\/chores\/daily\/reverse/);assert.match(worker,/daily_chore_reward_reversal/);assert.match(worker,/reversalReason/);assert.match(worker,/abs\(-9223372036854775808\)/);assert.match(html,/reverseChoreDay/);assert.match(html,/할 일 보상 승인 이력/);assert.match(html,/잘못 승인했어요/)});
 
 test('legacy reward correction preserves the original and adds an idempotent expense',()=>{assert.match(worker,/api\/chores\/legacy\/reverse/);assert.match(worker,/legacy_chore_reward_reversal/);assert.match(worker,/originalAmount/);assert.match(worker,/reverses:b\.id/);assert.match(html,/과거 할 일 보상 정정/);assert.match(html,/reverseLegacyChore/)});
+
+test('approved exemptions count toward completion but never pay',()=>{assert.match(html,/\['done','exempt_approved'\]\.includes/);assert.match(html,/x\.dayRecord\?\.state==='exempt_approved'\?0/);assert.match(worker,/x\.dayRecords\?\.\[date\]\?\.state==="exempt_approved"\?0/);assert.match(html,/면제는 달성률에 포함하되 보상금 제외/)});
