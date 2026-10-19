@@ -208,7 +208,7 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  const saved=await Promise.all(keys.map(k=>env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key=?").bind(me.family_id,k).first()));
  if(saved.some(x=>!x))return json({error:"데이터 없음"},409);
  const [requests,chores,ledger]=saved.map(x=>JSON.parse(x.value_json)),request=requests[key];
- if(!request||request.status!=="pending")return json({error:"대기 요청 없음"},409);
+ if(!request||request.status!=="pending"||request.name!==b.name||request.date!==b.date)return json({error:"대기 요청 없음"},409);const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  const date=b.date,day=new Date(date+"T12:00:00Z").getUTCDay();
  const items=(chores[b.name]||[]).filter(x=>x.active!==false&&(!x.startDate||x.startDate<=date)&&(!x.endDate||x.endDate>=date)&&(x.repeat==="daily"||x.repeat==="weekday"&&day>=1&&day<=5||x.repeat==="weekend"&&(day===0||day===6)||x.repeat==="days"&&x.days?.includes(day)||x.date===date));
  const amount=items.reduce((n,x)=>n+(Number(x.reward)>0?Number(x.reward):100),0);
