@@ -210,6 +210,25 @@ if(url.pathname==="/api/chores/exemption/review"&&req.method==="POST"){
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,state:item.dayRecords[b.date].state});
 }
+if(url.pathname==="/api/chores/daily/reverse"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"관리자 전용"},403);
+ const b=await body(req),key=String(b.name||"")+"|"+String(b.date||""),reason=String(b.reason||"").trim();
+ if(!b.name||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||reason.length<2||reason.length>500)return json({error:"취소 사유(2~500자)를 입력하세요."},400);
+ const saved=await Promise.all(["chore_daily_requests","allowance_ledger"].map(k=>env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key=?").bind(me.family_id,k).first()));
+ if(saved.some(x=>!x))return json({error:"데이터 없음"},409);
+ const requests=JSON.parse(saved[0].value_json),ledger=JSON.parse(saved[1].value_json),request=requests[key];
+ if(!request||request.name!==b.name||request.date!==b.date||request.status!=="approved")return json({error:"취소 가능한 승인 건이 아닙니다."},409);
+ const rows=ledger[b.name];if(!Array.isArray(rows))return json({error:"원본 지급 내역 없음"},409);
+ const paymentKey="daily_chore|"+key,original=rows.find(x=>x.di?.action==="daily_chore_reward"&&x.di?.dailyKey===paymentKey&&x.status==="approved");
+ if(!original||!Number.isSafeInteger(Number(original.amount))||Number(original.amount)<=0||Number(original.amount)!==Number(request.amount))return json({error:"원본 보상금 검증 실패"},409);
+ const reversalKey="daily_chore_reversal|"+key;
+ if(rows.some(x=>x.id===reversalKey||x.di?.reverses===paymentKey))return json({error:"이미 승인 취소 처리됨"},409);
+ const at=new Date().toISOString();rows.push({id:reversalKey,date:at.slice(0,10),type:"expense",wallet:"free",amount:Number(original.amount),title:b.date+" 할 일 보상 승인 취소",status:"approved",requestedBy:me.name,approvedBy:me.name,createdAt:at,di:{action:"daily_chore_reward_reversal",reverses:paymentKey,dailyKey:reversalKey,reason}});
+ requests[key]={...request,status:"reversed",reversedBy:me.name,reversedAt:at,reversalReason:reason,reversalId:reversalKey};
+ const ops=[env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?").bind(JSON.stringify(requests),me.id,me.family_id,saved[0].value_json),env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END"),env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,saved[1].value_json),env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END")];
+ try{await env.DB.batch(ops)}catch{return json({error:"동시 수정 충돌: 변경 없이 종료했습니다."},409)}
+ return json({ok:true,status:"reversed",amount:Number(original.amount),reversalId:reversalKey});
+}
 if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),key=b.name+"|"+b.date;
