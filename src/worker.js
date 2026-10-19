@@ -205,7 +205,7 @@ if(url.pathname==="/api/chores/exemption/review"&&req.method==="POST"){
  const b=await body(req);if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||!["approve","reject"].includes(b.decision))return json({error:"입력 오류"},400);
  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='chores'").bind(me.family_id).first();if(!state)return json({error:"할 일 데이터 없음"},409);
  const chores=JSON.parse(state.value_json),rows=chores[b.name];if(!Array.isArray(rows))return json({error:"할 일 없음"},404);
- const item=rows.find(x=>x.id===b.id);if(!item||item.dayRecords?.[b.date]?.state!=="exempt_requested")return json({error:"면제 요청 없음"},409);
+ const item=rows.find(x=>x.id===b.id);if(!item||item.dayRecords?.[b.date]?.state!=="exempt_requested")return json({error:"면제 요청 없음"},409);const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  item.dayRecords[b.date]={...item.dayRecords[b.date],state:b.decision==="approve"?"exempt_approved":"exempt_rejected",reviewedBy:me.name,reviewedAt:new Date().toISOString()};
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,state:item.dayRecords[b.date].state});
