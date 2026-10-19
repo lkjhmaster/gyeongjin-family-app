@@ -220,7 +220,7 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  const [requests,chores,ledger]=saved.map(x=>JSON.parse(x.value_json)),request=requests[key];
  if(!request||request.status!=="pending"||request.name!==b.name||request.date!==b.date)return json({error:"대기 요청 없음"},409);const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  const date=b.date,day=new Date(date+"T12:00:00Z").getUTCDay();
- const items=(chores[b.name]||[]).filter(x=>x.active!==false&&(!x.startDate||x.startDate<=date)&&(!x.endDate||x.endDate>=date)&&(x.repeat==="daily"||x.repeat==="weekday"&&day>=1&&day<=5||x.repeat==="weekend"&&(day===0||day===6)||x.repeat==="days"&&Array.isArray(x.days)&&x.days.includes(day)||x.repeat==="none"&&x.date===date||!x.repeat&&x.date===date));
+ const items=(Array.isArray(chores[b.name])?chores[b.name]:[]).filter(x=>x.active!==false&&(!x.startDate||x.startDate<=date)&&(!x.endDate||x.endDate>=date)&&(x.repeat==="daily"||x.repeat==="weekday"&&day>=1&&day<=5||x.repeat==="weekend"&&(day===0||day===6)||x.repeat==="days"&&Array.isArray(x.days)&&x.days.includes(day)||x.repeat==="none"&&x.date===date||!x.repeat&&x.date===date));
  const amount=items.reduce((n,x)=>n+(Number(x.reward)>0?Number(x.reward):100),0);
  if(b.decision==="approve"&&(!items.length||items.length!==request.items?.length||amount!==request.amount||!items.every(x=>["done","exempt_approved"].includes(x.dayRecords?.[date]?.state))))return json({error:"전체 완료 조건 미충족"},409);
  const paymentKey="daily_chore|"+key,rows=ledger[b.name]||[];
