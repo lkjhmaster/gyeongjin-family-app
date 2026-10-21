@@ -277,6 +277,29 @@ if(url.pathname==="/api/chores/late-completion"&&req.method==="POST"){
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,note:"완료 인정 기록만 저장되었습니다. 보상금은 자동 지급되지 않습니다."});
 }
+if(url.pathname==="/api/chores/late-exemption"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"관리자 전용"},403);
+ const b=await body(req),reason=String(b.reason||"").trim();
+ if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||b.date>=new Date().toISOString().slice(0,10)||reason.length<2||reason.length>500)return json({error:"날짜 및 인정 사유를 확인해주세요."},400);
+ const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();
+ if(!member)return json({error:"자녀 계정이 아닙니다."},403);
+ for(let retry=0;retry<3;retry++){
+  const row=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='chores'").bind(me.family_id).first();
+  if(!row)return json({error:"할 일 데이터 없음"},404);
+  let chores;try{chores=JSON.parse(row.value_json)}catch{return json({error:"할 일 데이터 오류"},500)}
+  const item=chores[b.name]?.find(x=>x.id===b.id);
+  if(!item||item.active===false||item.startDate&&b.date<item.startDate||item.endDate&&b.date>item.endDate||item.repeat==="none"&&item.date!==b.date)return json({error:"해당 날짜의 할 일이 아닙니다."},409);
+  const weekday=new Date(b.date+"T12:00:00Z").getUTCDay();
+  if(item.repeat==="weekday"&&(weekday===0||weekday===6)||item.repeat==="weekend"&&weekday!==0&&weekday!==6||item.repeat==="days"&&(!Array.isArray(item.days)||!item.days.includes(weekday)))return json({error:"해당 날짜에 배정되지 않은 할 일입니다."},409);
+  const previous=item.dayRecords?.[b.date];
+  if(previous&&["done","exempt_requested","exempt_approved"].includes(previous.state))return json({error:"이미 처리된 할 일입니다."},409);
+  const at=new Date().toISOString();
+  item.dayRecords={...(item.dayRecords||{}),[b.date]:{state:"exempt_approved",lateApproved:true,lateExempt:true,lateReason:reason,reason,reviewedBy:me.name,reviewedAt:at,previousState:previous?.state||"not_done"}};
+  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,row.value_json).run();
+  if(result.meta?.changes===1)return json({ok:true,note:"미수행 인정: 달성률 포함, 보상금 지급 없음"});
+ }
+ return json({error:"동시 변경 충돌. 다시 시도해주세요."},409);
+}
 if(url.pathname==="/api/chores/exemption/review"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req);if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||!["approve","reject"].includes(b.decision))return json({error:"입력 오류"},400);
