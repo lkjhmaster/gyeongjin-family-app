@@ -475,6 +475,7 @@ async function interactMemoryPhoto(id,index,action,value){
   state.memories=response.memories;
   localStorage.setItem('gyeongjin_memories',JSON.stringify(response.memories));
   if(window.photoReplyTarget)delete window.photoReplyTarget[id+'|'+index];
+  window.activeMemoryDiscussion=id+'|'+index;
   memories();
  }catch(e){toast(e.message||'반응 저장 실패')}
 }
@@ -488,12 +489,18 @@ function editPhotoComment(id,index,commentId){
  interactMemoryPhoto(id,index,'editComment',{id:commentId,text:next.trim()});
 }
 function setPhotoReply(id,index,parentId,name){window.photoReplyTarget=window.photoReplyTarget||{};window.photoReplyTarget[id+'|'+index]=parentId;const input=document.getElementById('photoComment_'+id+'_'+index);if(input){input.placeholder=name+'에게 답글...';input.focus();}}
+function toggleMemoryPhotoDiscussion(id,index){
+ const key=id+'|'+index;
+ window.activeMemoryDiscussion=window.activeMemoryDiscussion===key?null:key;
+ memories();
+}
 function memoryPhotoDiscussion(m,index){
  if(!m.id)return '';
  const id=JSON.stringify(m.id).replace(/"/g,'&quot;');
  const item=m.interactions?.[String(index)]||{},comments=Array.isArray(item.comments)?item.comments:[],reactions=item.reactions||{};
  const choices=['❤️','😂','😍','👏','🥹'];
- return '<div style="padding:8px 4px;border-top:1px solid #eee"><div style="display:flex;gap:5px;flex-wrap:wrap">'+choices.map(emoji=>{
+ const opened=window.activeMemoryDiscussion===m.id+'|'+index;
+ return '<div style="padding:6px 4px;border-top:1px solid #eee"><button class="ghost" style="width:100%;text-align:left;padding:8px" onclick="toggleMemoryPhotoDiscussion('+id+','+index+')">💬 사진 '+(index+1)+' · 댓글 '+comments.length+'개 '+(opened?'▲ 접기':'▼ 보기·작성')+'</button>'+(opened?'<div style="display:flex;gap:5px;flex-wrap:wrap">'+choices.map(emoji=>{
  const count=Object.values(reactions).filter(x=>x===emoji).length;
  return '<button class="ghost" style="padding:5px 8px" onclick="interactMemoryPhoto('+id+','+index+',\'react\',\''+emoji+'\')">'+emoji+(count?' '+count:'')+'</button>';
  }).join('')+'</div><div style="margin-top:8px">'+comments.filter(c=>!c.parentId||!comments.some(p=>p.id===c.parentId)).map(c=>{
@@ -503,7 +510,7 @@ function memoryPhotoDiscussion(m,index){
  const name=JSON.stringify(msg.author||'가족').replace(/"/g,'&quot;');
  return '<div style="font-size:13px;padding:7px 4px;'+(i?'margin-left:22px;border-left:2px solid #ddd;padding-left:10px;':'')+'"><small>'+esc(msg.author||'가족')+' · '+esc(msg.createdAt?new Date(msg.createdAt).toLocaleString('ko-KR'):'')+'</small>'+(msg.editedAt?' <small>(수정됨)</small>':'')+'<div style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(msg.text||'')+'</div><button class="ghost" style="padding:2px 6px" onclick="setPhotoReply('+id+','+index+','+JSON.stringify(c.id).replace(/"/g,'&quot;')+','+name+')">답글</button>'+(canDelete?' <button class="ghost" style="padding:2px 6px" onclick="editPhotoComment('+id+','+index+','+JSON.stringify(msg.id).replace(/"/g,'&quot;')+')">수정</button> <button class="ghost" style="padding:2px 6px" onclick="interactMemoryPhoto('+id+','+index+',\'deleteComment\','+JSON.stringify(msg.id).replace(/"/g,'&quot;')+')">삭제</button>':'')+'</div>';
  }).join('');
- }).join('')+'</div><div style="display:flex;gap:5px"><input maxlength="500" id="photoComment_'+m.id+'_'+index+'" placeholder="댓글 남기기" style="flex:1;min-width:0"><button class="secondary" onclick="(function(){const el=document.getElementById(\'photoComment_'+m.id+'_'+index+'\');if(el.value.trim())interactMemoryPhoto('+id+','+index+',\'comment\',el.value)})()">등록</button></div></div>';
+ }).join('')+'</div><div style="display:flex;gap:5px"><input maxlength="500" id="photoComment_'+m.id+'_'+index+'" placeholder="댓글 남기기" style="flex:1;min-width:0"><button class="secondary" onclick="(function(){const el=document.getElementById(\'photoComment_'+m.id+'_'+index+'\');if(el.value.trim())interactMemoryPhoto('+id+','+index+',\'comment\',el.value)})()">등록</button></div>':'')+'</div>';
 }
 function memoryEntriesHtml(items){return items.map(m=>{const photos=Array.isArray(m.photos)&&m.photos.length?m.photos:(m.photoData?[m.photoData]:[]),id=JSON.stringify(m.id||'').replace(/"/g,'&quot;'),admin=currentAccount?.isAdmin===true;return '<div class="memory"><div class="body"><b>'+esc(m.title)+'</b><br><small>'+esc(m.date)+' · '+esc(m.kind||'추억')+' · 사진 '+photos.length+'장</small></div>'+(photos.length?'<div style="display:flex;gap:6px;overflow-x:auto;padding:8px">'+photos.map((p,i)=>'<div style="position:relative;flex-shrink:0"><img src="'+p+'" alt="가족 추억 사진" style="height:170px;max-width:230px;object-fit:cover;border-radius:12px" onclick="window.open(this.src,\'_blank\')">'+(admin&&m.id?'<button class="ghost" style="position:absolute;right:3px;top:3px;background:white" onclick="deleteMemoryPhoto('+id+','+i+')">×</button>':'')+'</div>').join('')+'</div>'+photos.map((p,i)=>memoryPhotoDiscussion(m,i)).join(''):'<div class="fakephoto">📷</div>')+'<div class="body"><p style="line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(m.text||'')+'</p>'+(m.id?'<button class="secondary" onclick="addPhotosToMemory('+id+')">＋ 사진 추가</button>':'')+(admin&&m.id?'<button class="ghost" onclick="deleteMemoryPhoto('+id+',null)">기록 삭제</button>':'')+'</div></div>'}).join('')}
 function openFreeMemory(){shell('<div class="page"><button class="ghost back" onclick="memories()">← 추억</button><h1 class="title">사진 올리기</h1><div class="card"><label>구분</label><select id="freeMemoryKind"><option value="여행">여행</option><option value="일상">일상</option></select><label>앨범 이름</label><input id="freeMemoryTitle" maxlength="80" placeholder="여행·일상 이름"><label>날짜</label><input id="freeMemoryDate" type="date" value="'+localDateKey()+'"><label>사진 최대 5장</label><input id="memoryPhoto" type="file" accept="image/*" multiple onchange="previewPhoto(this)"><div id="photoPreview" style="min-height:130px">＋ 사진 미리보기</div><label>한마디</label><textarea id="freeMemoryText"></textarea></div><button class="primary full" onclick="saveFreeMemory()">사진 저장</button></div>')}
