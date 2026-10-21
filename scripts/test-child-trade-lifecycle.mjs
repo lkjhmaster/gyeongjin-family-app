@@ -169,14 +169,14 @@ test('cumulative wallet refunds are monotonic and exact even at one-won boundari
   sums.forEach((s,i)=>assert.deepEqual(s,{gross:parts[i].gross,fee:parts[i].fee}));
  }
 });
-test('mixed purchase including minus requires card receipt and zero fee',async()=>{
+test('mixed purchase including minus routes free to free and card/minus to card without fees',async()=>{
  const h=await fixture();
  const denied=await h.call('a','/child-trades',{kind:'goods',counterpartyId:'b',gross:1200,sourceWallet:'free',allocations:split,destinationWallet:'free',operationKey:crypto.randomUUID()});
- assert.equal(denied.status,400);
+ assert.equal(denied.status,201);
  const id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:'card'});
  assert.equal(h.row(id).fee_amount,0);
  await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
- assert.equal(h.ledger().Bob.at(-1).wallet,'card');assert.equal(h.ledger().Bob.filter(r=>r.childTradeId===id&&r.type==='income').reduce((n,r)=>n+r.amount,0),1200);
+ assert.deepEqual(h.ledger().Bob.filter(r=>r.childTradeId===id&&r.type==='income').map(r=>[r.wallet,r.amount]).sort((a,b)=>a[0].localeCompare(b[0])),[['card',900],['free',300]]);
 });
 test('buyer omits receipt inputs; seller selects receipt and buyer confirms final fees before approval',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
@@ -192,9 +192,10 @@ test('seller receipt changes invalidate the previous buyer confirmation and stal
  await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'free'});assert.equal(h.row(id).status,'requested');assert.equal((await h.call('p','/child-trades/approval/approve',{transactionId:id,revision})).status,409);assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,409);
  assert.equal((await h.mutate('a','/child-trades/decision',id,{decision:'consent'})).status,200);assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,200);
 });
-test('seller cannot choose minus or free receipt for mixed minus-funded goods',async()=>{
+test('seller cannot choose minus receipt; mixed goods always settle by original wallet',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
- for(const destinationWallet of ['minus','free'])assert.ok([400,409].includes((await h.mutate('b','/child-trades/receipt',id,{destinationWallet})).status));
+ assert.ok([400,409].includes((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'minus'})).status));
+ assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'free'})).status,200);
  assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card'})).status,200);
  assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1200);
 });
