@@ -382,6 +382,7 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  if(b.decision==="approve"&&(!items.length||items.length!==request.items?.length||amount!==request.amount||!items.every(x=>["done","exempt_approved"].includes(x.dayRecords?.[date]?.state))))return json({error:"전체 완료 조건 미충족"},409);
  const paymentKey="daily_chore|"+key,rows=ledger[b.name]||[];
  if(rows.some(x=>x.di?.dailyKey===paymentKey))return json({error:"이미 지급됨"},409);
+ if(b.decision==="approve"&&rows.some(x=>x.status==="approved"&&x.type==="income"&&x.wallet==="free"&&x.date===date&&/할.?일|보상|수동/.test(String(x.title||""))))return json({error:"같은 날짜의 수동 보상 지급 후보가 있습니다. 중복 지급 방지를 위해 승인을 차단했습니다."},409);
  if(b.decision==="approve"){rows.push({id:paymentKey,date,type:"income",wallet:"free",amount,title:date+" 하루 할 일 전체 달성 보상",status:"approved",approvedBy:me.name,di:{action:"daily_chore_reward",dailyKey:paymentKey}});ledger[b.name]=rows}
  requests[key]={...request,status:b.decision==="approve"?"approved":"rejected",reviewedBy:me.name};
  const nextRequests=JSON.stringify(requests),ops=[env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?) AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chores' AND value_json=?)").bind(nextRequests,me.family_id,saved[0].value_json,me.family_id,saved[2].value_json,me.family_id,saved[1].value_json)];
