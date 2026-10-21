@@ -264,7 +264,7 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
 if(url.pathname==="/api/chores/late-completion"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),reason=String(b.reason||"").trim(),memo=String(b.memo||"").trim();
- if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||b.date>=new Date().toISOString().slice(0,10)||reason.length<2||reason.length>500||memo.length>500)return json({error:"지난 날짜 및 인정 사유를 확인해주세요."},400);
+ if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||b.date>=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())||reason.length<2||reason.length>500||memo.length>500)return json({error:"지난 날짜 및 인정 사유를 확인해주세요."},400);
  const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='chores'").bind(me.family_id).first();if(!state)return json({error:"할 일 데이터 없음"},404);
  let chores;try{chores=JSON.parse(state.value_json)}catch{return json({error:"할 일 데이터 오류"},500)}
@@ -280,7 +280,7 @@ if(url.pathname==="/api/chores/late-completion"&&req.method==="POST"){
 if(url.pathname==="/api/chores/history/correct"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),reason=String(b.reason||"").trim(),date=String(b.date||"");
- if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date>=new Date().toISOString().slice(0,10)||reason.length<2||reason.length>500||b.state!=="exempt_approved")return json({error:"수정 입력 오류"},400);
+ if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date>=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())||reason.length<2||reason.length>500||b.state!=="exempt_approved")return json({error:"수정 입력 오류"},400);
  const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();
  if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  const key=b.name+"|"+date;
@@ -306,7 +306,7 @@ if(url.pathname==="/api/chores/history/correct"&&req.method==="POST"){
 if(url.pathname==="/api/chores/late-exemption"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),reason=String(b.reason||"").trim();
- if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||b.date>=new Date().toISOString().slice(0,10)||reason.length<2||reason.length>500)return json({error:"날짜 및 인정 사유를 확인해주세요."},400);
+ if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(b.date||"")||b.date>=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())||reason.length<2||reason.length>500)return json({error:"날짜 및 인정 사유를 확인해주세요."},400);
  const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();
  if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  for(let retry=0;retry<3;retry++){
@@ -371,7 +371,7 @@ if(url.pathname==="/api/chores/daily/reverse"&&req.method==="POST"){
 if(url.pathname==="/api/chores/daily/prepare-past"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),name=String(b.name||""),date=String(b.date||""),key=name+"|"+date;
- if(!name||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date>=new Date().toISOString().slice(0,10))return json({error:"지난 날짜만 처리할 수 있습니다."},400);
+ if(!name||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date>=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()))return json({error:"지난 날짜만 처리할 수 있습니다."},400);
  const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,name).first();
  if(!member)return json({error:"자녀 계정이 아닙니다."},403);
  const keys=["chore_daily_requests","chores","allowance_ledger"];
