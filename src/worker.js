@@ -341,6 +341,41 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  const guarded=ops.flatMap(op=>[op,env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END")]);try{await env.DB.batch(guarded)}catch{return json({error:"동시 변경 충돌: 지급 없이 종료했습니다."},409)}
  return json({ok:true,status:requests[key].status});
 }
+if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
+ const b=await body(req),memoryId=String(b.memoryId||""),photoIndex=b.photoIndex,action=String(b.action||"");
+ if(!memoryId||!Number.isInteger(photoIndex)||photoIndex<0||!["comment","react","deleteComment"].includes(action))return json({error:"요청 형식 오류"},400);
+ for(let retry=0;retry<4;retry++){
+  const row=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='memories'").bind(me.family_id).first();
+  if(!row)return json({error:"사진첩 없음"},404);
+  let memories;try{memories=JSON.parse(row.value_json)}catch{return json({error:"사진첩 데이터 오류"},500)}
+  const memory=memories.find(x=>x.id===memoryId);
+  const photos=Array.isArray(memory?.photos)?memory.photos:(memory?.photoData?[memory.photoData]:[]);
+  if(!memory||photoIndex>=photos.length)return json({error:"사진을 찾을 수 없습니다."},404);
+  if(!memory.interactions||typeof memory.interactions!=="object")memory.interactions={};
+  const key=String(photoIndex),item=memory.interactions[key]||{comments:[],reactions:{}};
+  if(!Array.isArray(item.comments))item.comments=[];
+  if(!item.reactions||typeof item.reactions!=="object")item.reactions={};
+  if(action==="comment"){
+   const value=String(b.text||"").trim();
+   if(!value||value.length>500)return json({error:"댓글은 1~500자입니다."},400);
+   item.comments.push({id:crypto.randomUUID(),authorId:me.id,author:me.name,text:value,createdAt:new Date().toISOString()});
+  }else if(action==="react"){
+   const emoji=String(b.emoji||"");
+   if(!["❤️","😂","😍","👏","🥹"].includes(emoji))return json({error:"지원하지 않는 반응"},400);
+   if(item.reactions[me.id]===emoji)delete item.reactions[me.id];else item.reactions[me.id]=emoji;
+  }else{
+   const index=item.comments.findIndex(x=>x.id===b.commentId);
+   if(index<0)return json({error:"댓글 없음"},404);
+   if(!me.is_admin&&item.comments[index].authorId!==me.id)return json({error:"권한 없음"},403);
+   item.comments.splice(index,1);
+  }
+  memory.interactions[key]=item;
+  const updated=JSON.stringify(memories);
+  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=datetime('now') WHERE family_id=? AND state_key='memories' AND value_json=?").bind(updated,me.family_id,row.value_json).run();
+  if(result.meta.changes===1)return json({ok:true,memories});
+ }
+ return json({error:"동시 수정 충돌. 다시 시도해주세요."},409);
+}
 if(url.pathname==="/api/memories/delete"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"사진 삭제는 부모 관리자만 가능합니다."},403);
  const b=await body(req),id=String(b.id||""),photoIndex=b.photoIndex;
