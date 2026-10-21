@@ -343,7 +343,7 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
 }
 if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
  const b=await body(req),memoryId=String(b.memoryId||""),photoIndex=b.photoIndex,action=String(b.action||"");
- if(!memoryId||!Number.isInteger(photoIndex)||photoIndex<0||!["comment","react","deleteComment"].includes(action))return json({error:"요청 형식 오류"},400);
+ if(!memoryId||!Number.isInteger(photoIndex)||photoIndex<0||!["comment","react","editComment","deleteComment"].includes(action))return json({error:"요청 형식 오류"},400);
  for(let retry=0;retry<4;retry++){
   const row=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='memories'").bind(me.family_id).first();
   if(!row)return json({error:"사진첩 없음"},404);
@@ -355,12 +355,22 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
   const key=String(photoIndex),item=memory.interactions[key]||{comments:[],reactions:{}};
   if(!Array.isArray(item.comments))item.comments=[];
   if(!item.reactions||typeof item.reactions!=="object")item.reactions={};
+  if(!Array.isArray(item.audit))item.audit=[];
   if(action==="comment"){
    const value=String(b.text||"").trim();
    if(!value||value.length>500)return json({error:"댓글은 1~500자입니다."},400);
    const parentId=b.parentId?String(b.parentId):null;
    if(parentId&&!item.comments.some(c=>c.id===parentId))return json({error:"답글 대상 댓글을 찾을 수 없습니다."},404);
    item.comments.push({id:crypto.randomUUID(),parentId,authorId:me.id,author:me.name,text:value,createdAt:new Date().toISOString()});
+  }else if(action==="editComment"){
+   const comment=item.comments.find(x=>x.id===b.commentId);
+   if(!comment)return json({error:"댓글 없음"},404);
+   if(!me.is_admin&&comment.authorId!==me.id)return json({error:"권한 없음"},403);
+   const value=String(b.text||"").trim();
+   if(!value||value.length>500)return json({error:"댓글은 1~500자입니다."},400);
+   if(value===comment.text)return json({ok:true,memories});
+   item.audit.push({action:"edit",commentId:comment.id,actorId:me.id,actor:me.name,previousText:comment.text,newText:value,at:new Date().toISOString()});
+   comment.text=value;comment.editedAt=new Date().toISOString();
   }else if(action==="react"){
    const emoji=String(b.emoji||"");
    if(!["❤️","😂","😍","👏","🥹"].includes(emoji))return json({error:"지원하지 않는 반응"},400);
@@ -370,6 +380,7 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
    if(index<0)return json({error:"댓글 없음"},404);
    if(!me.is_admin&&item.comments[index].authorId!==me.id)return json({error:"권한 없음"},403);
    const removed=item.comments[index];
+   item.audit.push({action:"delete",commentId:removed.id,actorId:me.id,actor:me.name,previousText:removed.text,at:new Date().toISOString()});
    item.comments.splice(index,1);
    for(const reply of item.comments)if(reply.parentId===removed.id)reply.parentId=null;
   }
