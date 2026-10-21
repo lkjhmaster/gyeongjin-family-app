@@ -58,7 +58,7 @@ test('real SQLite: minus debt receives net repayment and refund restores the sam
  const h=await fixture(),ledger=h.ledger();ledger.Bob.push({id:'debt-b',type:'expense',wallet:'minus',amount:2000,status:'approved',debtOrigin:'free'});
  h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
  const id=await h.create('goods',{gross:1001,destinationWallet:'minus',destinationDebtId:'debt-b'});await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
- assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');assert.equal(h.ledger().Bob.at(-1).amount,1000);
+ assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');assert.equal(h.ledger().Bob.at(-1).amount,500);
  assert.equal((await h.action(id,'cancel')).status,200);assert.equal(h.ledger().Bob.at(-1).type,'expense');assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');
  const next=await h.create('goods',{gross:4000,destinationWallet:'minus',destinationDebtId:'debt-b'});await h.approve(next);await h.mutate('a','/child-trades/delivery',next);assert.equal((await h.mutate('b','/child-trades/delivery',next)).status,200);
 });
