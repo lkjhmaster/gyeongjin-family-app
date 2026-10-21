@@ -81,13 +81,13 @@ export async function childTradeLifecycle(req,env,me,json){
   }
   function paymentQuote(kind,gross,source,dest,owner,debtId,allocations){
    let parts;try{parts=fundingInputs(kind,gross,source,allocations)}catch(e){throw new TradeError(e.message,400)}
-   parts=parts.map(p=>({...p,...quote(p.gross,p.wallet,kind==='goods'?goodsDestination(p.wallet):dest,owner,kind==='goods'?null:debtId,true)}));
+   parts=parts.map(p=>({...p,...quote(p.gross,p.wallet,kind==='goods'?'card':dest,owner,kind==='goods'?null:debtId,true)}));
    const fee=parts.reduce((n,p)=>n+p.fee,0);requireTrade(gross-fee>0,'실수령액이 없습니다.',400);
    return {gross,fee,net:gross-fee,parts};
   }
   const usesMinus=parts=>parts.some(p=>p.wallet==='minus'&&p.gross>0);
-  const goodsDestination=wallet=>wallet==='free'?'free':'card';
-  const enforceGoodsReceipt=(parts,destination)=>requireTrade(destination==='card'||destination==='free','판매대금은 자유→자유, 카드·마이너스→카드로 분리 입금됩니다.',400);
+  const goodsDestination=wallet=>'card';
+  const enforceGoodsReceipt=(parts,destination)=>requireTrade(destination==='card'||destination==='free','물품 판매대금은 구매 출처와 관계없이 카드용돈으로만 입금됩니다.',400);
   const funding=tx=>{const found=tables.funding.filter(f=>f.transaction_id===tx.id);return found.length?wallets.flatMap(wallet=>found.filter(f=>f.wallet===wallet).map(f=>({wallet,gross:f.gross_amount,fee:f.fee_amount,net:f.gross_amount-f.fee_amount}))):[{wallet:tx.source_wallet,gross:tx.gross_amount,fee:tx.fee_amount,net:tx.net_amount}];};
   const held=tx=>{const holds=activeHolds().filter(h=>h.transaction_id===tx.id&&h.status==='active');return holds.length?{gross_amount:holds.reduce((n,h)=>n+h.gross_amount,0)}:null;};
   const setFunding=(tx,parts)=>{add('DELETE FROM child_trade_funding WHERE transaction_id=?',tx.id);for(const p of parts)add("INSERT INTO child_trade_funding(transaction_id,wallet,gross_amount,fee_amount,hold_status) VALUES(?,?,?,?,'planned')",tx.id,p.wallet,p.gross,p.fee);};
@@ -195,7 +195,7 @@ export async function childTradeLifecycle(req,env,me,json){
    if(tx.kind!=='goods')return false;
    const request=await q("SELECT payload_json FROM child_trade_audit WHERE transaction_id=? AND action='request' ORDER BY revision LIMIT 1",tx.id).first();
    if(!JSON.parse(request?.payload_json||'{}').receiptPending)return false;
-   const latest=await q("SELECT action FROM child_trade_audit WHERE transaction_id=? AND action IN ('receipt_selected','terms_changed','approve_revise') ORDER BY revision DESC LIMIT 1",tx.id).first();
+   const latest=await q("SELECT action FROM child_trade_audit WHERE transaction_id=? AND action IN ('receipt_selected','terms_changed','approve_revise') ORDER BY revision DESC,created_at DESC LIMIT 1",tx.id).first();
    return latest?.action!=='receipt_selected';
   }
   if(path==='/detail'&&req.method==='GET'){
@@ -216,9 +216,9 @@ export async function childTradeLifecycle(req,env,me,json){
    if(path==='/receipt/quote')return json({ok:true,...payment});
    add('UPDATE child_trade_transactions SET destination_wallet=?,fee_amount=?,net_amount=? WHERE id=?',b.destinationWallet,payment.fee,payment.net,tx.id);
    if(tables.funding.some(f=>f.transaction_id===tx.id))setFunding(tx,payment.parts);
-   add('UPDATE child_trade_details SET destination_debt_id=?,consent_required_id=? WHERE transaction_id=?',b.destinationDebtId||null,tx.payer_id,tx.id);
-   change(tx,'requested');approval(tx,'consent','counterparty');audit(tx,'receipt_selected','requested',{...payment,destinationWallet:b.destinationWallet,destinationDebtId:b.destinationDebtId||null});
-   return await commit({ok:true,buyerConfirmationRequired:true});
+   add('UPDATE child_trade_details SET destination_debt_id=?,consent_required_id=? WHERE transaction_id=?',null,tx.payee_id,tx.id);
+   change(tx,'consented');approval(tx,'consent','counterparty');audit(tx,'receipt_selected','consented',{...payment,destinationWallet:'card',destinationDebtId:null});
+   return await commit({ok:true,parentApprovalRequired:true});
   }
   if(path==='/terms'){
    requireTrade(participant&&!me.is_admin&&['requested','consented'].includes(tx.status),'승인 전 거래 당사자만 조건을 변경할 수 있습니다.',403);
