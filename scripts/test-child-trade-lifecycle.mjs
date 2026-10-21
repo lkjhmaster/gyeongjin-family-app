@@ -58,7 +58,7 @@ test('minus-funded purchase settles to card regardless of legacy receipt prefere
  const h=await fixture();
  for(const destinationWallet of ['free','minus']){
   const result=await h.call('a','/child-trades',{kind:'goods',counterpartyId:'b',gross:1000,sourceWallet:'minus',destinationWallet,operationKey:crypto.randomUUID()});
-  assert.equal(result.status,destinationWallet==='minus'?400:201);
+  assert.equal(result.status,400);
  }
  const id=await h.create('goods',{gross:1000,sourceWallet:'minus',destinationWallet:'card'});
  assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1000);
