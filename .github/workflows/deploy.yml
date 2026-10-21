@@ -10,6 +10,8 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: read
+  checks: write
+  statuses: write
 jobs:
   deploy:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
