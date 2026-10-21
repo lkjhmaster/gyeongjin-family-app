@@ -358,7 +358,9 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
   if(action==="comment"){
    const value=String(b.text||"").trim();
    if(!value||value.length>500)return json({error:"댓글은 1~500자입니다."},400);
-   item.comments.push({id:crypto.randomUUID(),authorId:me.id,author:me.name,text:value,createdAt:new Date().toISOString()});
+   const parentId=b.parentId?String(b.parentId):null;
+   if(parentId&&!item.comments.some(c=>c.id===parentId))return json({error:"답글 대상 댓글을 찾을 수 없습니다."},404);
+   item.comments.push({id:crypto.randomUUID(),parentId,authorId:me.id,author:me.name,text:value,createdAt:new Date().toISOString()});
   }else if(action==="react"){
    const emoji=String(b.emoji||"");
    if(!["❤️","😂","😍","👏","🥹"].includes(emoji))return json({error:"지원하지 않는 반응"},400);
@@ -367,7 +369,9 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
    const index=item.comments.findIndex(x=>x.id===b.commentId);
    if(index<0)return json({error:"댓글 없음"},404);
    if(!me.is_admin&&item.comments[index].authorId!==me.id)return json({error:"권한 없음"},403);
+   const removed=item.comments[index];
    item.comments.splice(index,1);
+   for(const reply of item.comments)if(reply.parentId===removed.id)reply.parentId=null;
   }
   memory.interactions[key]=item;
   const updated=JSON.stringify(memories);
