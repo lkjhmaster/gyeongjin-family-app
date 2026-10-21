@@ -209,7 +209,7 @@ export async function childTradeLifecycle(req,env,me,json){
   const open=tables.actions.find(a=>a.transaction_id===tx.id&&['requested','consented'].includes(a.status));
   if(path==='/receipt'||path==='/receipt/quote'){
    requireTrade(tx.kind==='goods'&&me.id===tx.payee_id&&!me.is_admin,'판매자만 수령 용돈을 선택할 수 있습니다.',403);
-   requireTrade(['requested','consented'].includes(tx.status),'부모 승인 전 거래에서 선택해주세요.');
+   requireTrade(tx.status==='requested','판매 동의는 승인 요청 전 한 번만 가능합니다.');
    const parts=funding(tx),payment=paymentQuote('goods',tx.gross_amount,tx.source_wallet,b.destinationWallet,tx.payee_id,b.destinationDebtId,Object.fromEntries(parts.map(p=>[p.wallet,p.gross])));
    enforceGoodsReceipt(parts,b.destinationWallet);
    receiveCapacity(tx.payee_id,{...tx,destination_wallet:b.destinationWallet},payment.net,b.destinationDebtId);
