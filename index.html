@@ -391,19 +391,18 @@ async function childTradeLoadDebts(){
 }
 async function childTradeReceiptForm(){
  const info=childTradeScreen.detail,tx=info.transaction;
- if(tx.kind!=='goods'||currentAccount?.id!==tx.payee_id){toast('판매자만 수령 용돈을 선택할 수 있습니다.');return}
- const cardOnly=(info.funding||[]).some(p=>p.wallet==='minus'&&Number(p.gross)>0);
- const response=await api('/api/state'),rows=response.state?.allowance_ledger?.[currentAccount.name]||[];
- const debts=rows.filter(r=>r.status==='approved'&&r.type==='expense'&&r.wallet==='minus'&&['free','card'].includes(r.debtOrigin)).map(r=>({...r,remaining:r.amount-rows.filter(c=>c.status==='approved'&&c.wallet==='minus'&&c.repaymentDebtId===r.id).reduce((n,c)=>n+(c.type==='income'?c.amount:c.type==='expense'?-c.amount:0),0)})).filter(r=>r.remaining>0);
- shell('<div class="page"><button class="ghost back" data-id="'+esc(tx.id)+'" onclick="childTradeDetail(this.dataset.id)">← 거래 상세</button><h1 class="title">판매대금 수령 설정</h1><div class="card"><p>마이너스용돈으로 구매한 금액이 포함되면 카드용돈으로만 수령할 수 있으며 수수료는 없습니다. 수령 용돈을 선택하면 수수료와 실수령액을 계산합니다. 구매자가 최종 조건을 확인한 뒤 부모가 승인합니다.</p><label>판매대금 받을 용돈</label><select id="tradeReceiptWallet" onchange="document.getElementById(\'tradeReceiptDebtFields\').style.display=this.value===\'minus\'?\'\':\'none\'"><option value="">선택해주세요</option>'+Object.entries(tradeWalletName).filter(([w])=>!cardOnly||w==='card').map(([w,l])=>'<option value="'+w+'">'+l+'</option>').join('')+'</select><div id="tradeReceiptDebtFields" style="display:none"><label>판매대금으로 갚을 마이너스 사용 내역</label><select id="tradeReceiptDebt"><option value="">사용 내역 선택</option>'+debts.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.title||'마이너스 사용')+' · 남은 금액 '+r.remaining.toLocaleString()+'원 ('+tradeWalletName[r.debtOrigin]+')</option>').join('')+'</select></div><p id="tradeReceiptQuote" class="label"></p>'+tradeButton('수령 금액 확인·판매 동의','receipt-save')+'</div></div>');
+ if(tx.kind!=='goods'||currentAccount?.id!==tx.payee_id){toast('판매자만 판매 동의할 수 있습니다.');return}
+ const parts=info.funding?.length?info.funding:[{wallet:tx.source_wallet,gross:tx.gross_amount}];
+ const receipts={free:0,card:0};
+ for(const part of parts)receipts[part.wallet==='free'?'free':'card']+=Number(part.gross)||0;
+ shell('<div class="page"><button class="ghost back" data-id="'+esc(tx.id)+'" onclick="childTradeDetail(this.dataset.id)">← 거래 상세</button><h1 class="title">판매 동의</h1><div class="card"><p>구매자가 사용한 용돈 출처에 따라 판매대금이 자동 입금됩니다. 수령 용돈을 따로 선택하지 않습니다.</p><p>자유용돈 수령 '+receipts.free.toLocaleString()+'원</p><p>카드용돈 수령 '+receipts.card.toLocaleString()+'원</p><p>수수료 0원 · 총 수령 '+(receipts.free+receipts.card).toLocaleString()+'원</p><p>판매 동의 후 구매자의 최종 확인과 부모 승인이 필요합니다.</p>'+tradeButton('판매 동의','receipt-save')+'</div></div>');
 }
 async function childTradeSaveReceipt(){
- const tx=childTradeScreen.detail.transaction,destinationWallet=$('#tradeReceiptWallet').value;
- if(!destinationWallet){toast('수령 용돈을 선택해주세요.');return}
- const data={transactionId:tx.id,revision:tx.revision,destinationWallet,destinationDebtId:destinationWallet==='minus'?$('#tradeReceiptDebt').value:null};
+ const tx=childTradeScreen.detail.transaction;
+ const data={transactionId:tx.id,revision:tx.revision,destinationWallet:'card',destinationDebtId:null};
  const quote=await api('/api/child-trades/receipt/quote',{method:'POST',body:JSON.stringify(data)});
- const summary='구매자 총 출금 '+quote.gross.toLocaleString()+'원 · 수수료 '+quote.fee.toLocaleString()+'원 · 내가 받는 금액 '+quote.net.toLocaleString()+'원';$('#tradeReceiptQuote').textContent=summary;
- if(!confirm(summary+'\n수령 설정에 동의하고 구매자에게 최종 확인을 요청할까요?'))return;
+ const summary='구매자 총 출금 '+quote.gross.toLocaleString()+'원 · 수수료 '+quote.fee.toLocaleString()+'원 · 판매자 총 수령 '+quote.net.toLocaleString()+'원';
+ if(!confirm(summary+'\\n용돈 출처별 자동 수령에 동의하고 구매자에게 최종 확인을 요청할까요?'))return;
  await api('/api/child-trades/receipt',{method:'POST',body:JSON.stringify(data)});await childTradeDetail(tx.id);
 }
 async function childTradeCommand(button){
@@ -461,7 +460,7 @@ async function childTradeDetail(id){
  let controls='';
  if(!admin&&participant&&['requested','consented'].includes(tx.status)){
   if(tx.status==='requested'&&!info.receiptPending&&mine===(info.detail.consent_required_id||tx.counterparty_id))controls+=tradeButton('조건 확인·동의','consent')+tradeButton('거절','reject');
-  if(tx.kind==='goods'&&mine===tx.payee_id)controls+=tradeButton('수령 용돈 선택·판매 동의','receipt');
+  if(tx.kind==='goods'&&mine===tx.payee_id)controls+=tradeButton('판매 동의','receipt');
   controls+=tradeButton('신청 취소','cancel')+tradeButton('용돈·금액 조건 변경 (재동의 필요)','terms');
  }
  if(admin&&tx.status==='consented')controls+=tradeButton(tx.kind==='goods'?'승인·예약':'승인·송금','approve')+tradeButton('거절','parent-reject');
@@ -477,7 +476,7 @@ async function childTradeDetail(id){
  }
  const actions=info.actions.map(a=>{let buttons='';const extra='data-action="'+esc(a.id)+'"';if(a.status==='requested'&&mine===a.counterparty_id)buttons+=tradeButton('변경 동의','action-consent',extra)+tradeButton('변경 거절','action-reject',extra);if(a.status==='requested'&&mine===a.requester_id)buttons+=tradeButton('변경 요청 취소','action-cancel',extra);if(a.status==='consented'&&admin)buttons+=tradeButton('변경 승인','action-approve',extra)+tradeButton('변경 거절','action-reject',extra);let payload={};try{payload=JSON.parse(a.payload_json)}catch{}return '<div class="event"><b>'+esc(({refund:'환불',cancel:'취소',revise:'조건 변경',resolve:'분쟁 해제'})[a.kind]||a.kind)+' · '+esc(a.status)+'</b><small>'+esc(payload.reason||'')+(payload.gross?' · '+Number(payload.gross).toLocaleString()+'원':'')+'</small>'+childTradeFundingSummary(payload.parts)+buttons+'</div>'}).join('');
  const name=id=>info.members.find(m=>m.id===id)?.name||id;
- shell('<div class="page"><button class="ghost back" onclick="childTradePreview(childTradeScreen.encoded,childTradeScreen.tab)">← 거래 내역</button><h1 class="title">거래 상세</h1><div class="card"><b>'+esc(name(tx.payer_id))+' → '+esc(name(tx.payee_id))+'</b><p>'+esc(tx.kind==='goods'&&tx.status==='requested'?(info.receiptPending?'판매자 수령 선택 대기':info.detail.consent_required_id===tx.payer_id?'구매자 최종 확인 대기':tradeStateName[tx.status]):tradeStateName[tx.status]||tx.status)+'</p><p>'+esc(info.detail.title||'')+'</p><p>총 출금 '+tx.gross_amount.toLocaleString()+'원'+(info.receiptPending?' · 판매자 수령 선택 후 수수료·실수령액 확정':' · 수수료 '+tx.fee_amount.toLocaleString()+'원 · 실제 수령 '+tx.net_amount.toLocaleString()+'원')+'</p><p>'+(info.funding?.length>1?'용돈 합쳐 결제':tradeWalletName[tx.source_wallet])+' → '+(info.receiptPending?'판매자 선택 대기':tradeWalletName[tx.destination_wallet])+'</p>'+childTradeFundingSummary(info.funding,info.receiptPending)+(info.loan?'<p>남은 원금 '+Number(info.loan.outstanding_amount).toLocaleString()+'원 · 예정일 '+esc(info.loan.due_date||'미지정')+'</p>':'')+'<p>누적 환불 '+Number(info.detail.refunded_gross||0).toLocaleString()+'원 · 전달 확인 '+info.delivery.length+'/2</p><div class="choice" style="flex-wrap:wrap;gap:8px">'+controls+'</div></div>'+actions+'<div class="card"><b>전체 변경 이력</b>'+info.events.map(e=>'<div class="event"><small>'+esc(new Date(e.created_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}))+' · '+esc(name(e.actor_id))+'</small><br>'+esc(tradeActionName[e.action]||'거래 변경')+' → '+esc(tradeStateName[e.next_state]||e.next_state||'')+'</div>').join('')+'</div></div>');
+ shell('<div class="page"><button class="ghost back" onclick="childTradePreview(childTradeScreen.encoded,childTradeScreen.tab)">← 거래 내역</button><h1 class="title">거래 상세</h1><div class="card"><b>'+esc(name(tx.payer_id))+' → '+esc(name(tx.payee_id))+'</b><p>'+esc(tx.kind==='goods'&&tx.status==='requested'?(info.receiptPending?'판매자 동의 대기':info.detail.consent_required_id===tx.payer_id?'구매자 최종 확인 대기':tradeStateName[tx.status]):tradeStateName[tx.status]||tx.status)+'</p><p>'+esc(info.detail.title||'')+'</p><p>총 출금 '+tx.gross_amount.toLocaleString()+'원'+(info.receiptPending?' · 판매자 동의 후 거래 조건 확정':' · 수수료 '+tx.fee_amount.toLocaleString()+'원 · 실제 수령 '+tx.net_amount.toLocaleString()+'원')+'</p><p>'+(info.funding?.length>1?'용돈 합쳐 결제':tradeWalletName[tx.source_wallet])+' → '+(info.receiptPending?'출처별 자동 수령':tradeWalletName[tx.destination_wallet])+'</p>'+childTradeFundingSummary(info.funding,info.receiptPending)+(info.loan?'<p>남은 원금 '+Number(info.loan.outstanding_amount).toLocaleString()+'원 · 예정일 '+esc(info.loan.due_date||'미지정')+'</p>':'')+'<p>누적 환불 '+Number(info.detail.refunded_gross||0).toLocaleString()+'원 · 전달 확인 '+info.delivery.length+'/2</p><div class="choice" style="flex-wrap:wrap;gap:8px">'+controls+'</div></div>'+actions+'<div class="card"><b>전체 변경 이력</b>'+info.events.map(e=>'<div class="event"><small>'+esc(new Date(e.created_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}))+' · '+esc(name(e.actor_id))+'</small><br>'+esc(tradeActionName[e.action]||'거래 변경')+' → '+esc(tradeStateName[e.next_state]||e.next_state||'')+'</div>').join('')+'</div></div>');
 }
 async function childTradeApprovalCards(){
  const queue=await api('/api/child-trades/approval-queue');
