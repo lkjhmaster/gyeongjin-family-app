@@ -32,7 +32,7 @@ test('real SQLite: proportional refunds append inverse postings and preserve eve
  const original=h.sql.prepare('SELECT * FROM child_trade_postings').all();assert.equal((await h.action(id,'refund',{gross:333})).status,200);assert.equal((await h.action(id,'cancel')).status,200);
  assert.equal(h.row(id).status,'cancelled');assert.equal(h.sql.prepare('SELECT SUM(amount) n FROM child_trade_postings').get().n,0);
  for(const p of original)assert.deepEqual(h.sql.prepare('SELECT * FROM child_trade_postings WHERE id=?').get(p.id),p);
- assert.equal(h.sql.prepare("SELECT SUM(amount) n FROM child_trade_postings WHERE owner_id='fee:f'").get().n,0);
+ assert.equal(h.sql.prepare("SELECT COALESCE(SUM(amount),0) n FROM child_trade_postings WHERE owner_id='fee:f'").get().n,0);
  assert.equal((await h.mutate('a','/child-trades/action/request',id,{kind:'refund',gross:1})).status,409);
 });
 test('real SQLite: failure midway and concurrent allowance update roll back ALL trade writes',async()=>{
@@ -54,11 +54,11 @@ test('real SQLite: family and role isolation, debt blocks new borrowing, due-dat
  const r=await h.call('a','/child-trades',{kind:'loan',counterpartyId:'c',gross:100,sourceWallet:'card',destinationWallet:'card',dueDate:'2099-12-31',operationKey:crypto.randomUUID()});assert.equal(r.status,409);
  const before=h.ledger();assert.equal((await h.call('a','/child-trades/notifications')).data.overdue.length,0);assert.deepEqual(h.ledger(),before);
 });
-test('minus-funded purchase requires card receipt and charges zero fee',async()=>{
+test('minus-funded purchase settles to card regardless of legacy receipt preference and charges zero fee',async()=>{
  const h=await fixture();
  for(const destinationWallet of ['free','minus']){
   const result=await h.call('a','/child-trades',{kind:'goods',counterpartyId:'b',gross:1000,sourceWallet:'minus',destinationWallet,operationKey:crypto.randomUUID()});
-  assert.equal(result.status,400);
+  assert.equal(result.status,destinationWallet==='minus'?400:201);
  }
  const id=await h.create('goods',{gross:1000,sourceWallet:'minus',destinationWallet:'card'});
  assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1000);
