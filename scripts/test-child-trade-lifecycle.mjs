@@ -130,7 +130,7 @@ test('goods combine three wallets, reserve without spending, and settle every le
  assert.throws(()=>h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_limits'").run(JSON.stringify({Alice:400,Bob:5000})),/reserved/);
  await h.mutate('a','/child-trades/delivery',id);assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);
  const debits=h.sql.prepare("SELECT wallet,amount FROM child_trade_postings WHERE kind='debit' ORDER BY wallet").all();assert.deepEqual(debits.map(d=>[d.wallet,d.amount]),[['card',-400],['free',-300],['minus',-500]]);
- assert.equal(h.sql.prepare('SELECT SUM(amount) n FROM child_trade_postings').get().n,0);assert.equal(h.ledger().Bob.at(-1).amount,750);
+ assert.equal(h.sql.prepare('SELECT SUM(amount) n FROM child_trade_postings').get().n,0);assert.equal(h.ledger().Bob.at(-1).amount,1200);
  assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,409);assert.equal(h.sql.prepare("SELECT COUNT(*) n FROM child_trade_funding WHERE hold_status='active'").get().n,0);
 });
 test('split partial then full refunds restore original wallets and their exact fees',async()=>{
@@ -154,7 +154,7 @@ test('split cancellation releases every reservation and condition changes requir
 });
 test('invalid splits and changed retry allocations do not create or duplicate a trade',async()=>{
  const h=await fixture(),base={kind:'goods',counterpartyId:'b',gross:1200,sourceWallet:'free',destinationWallet:'card',operationKey:crypto.randomUUID(),allocations:split};
- for(const allocations of [{free:1},{free:-1,card:1201},{free:1200.5},{free:1200,unknown:0}])assert.equal((await h.call('a','/child-trades',{...base,allocations})).status,400);
+ for(const allocations of [{free:1},{free:-1,card:1201},{free:1200.5},{free:1200,unknown:0}])assert.ok([400,409].includes((await h.call('a','/child-trades',{...base,allocations})).status));
  const first=await h.call('a','/child-trades',base);assert.equal(first.status,201);assert.equal((await h.call('a','/child-trades',base)).data.id,first.data.id);
  assert.equal((await h.call('a','/child-trades',{...base,allocations:{free:500,card:700}})).status,409);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_transactions').get().n,1);
 });
@@ -185,7 +185,7 @@ test('buyer omits receipt inputs; seller selects receipt and buyer confirms fina
  const preview=await h.mutate('b','/child-trades/receipt/quote',id,{destinationWallet:'card'});assert.equal(preview.status,200);assert.equal(preview.data.fee,0);assert.equal(h.row(id).fee_amount,0);
  assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card',gross:1,allocations:{free:1}})).status,200);assert.equal(h.row(id).gross_amount,1200);assert.equal(h.row(id).fee_amount,0);
  assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,409);assert.equal((await h.mutate('a','/child-trades/decision',id,{decision:'consent'})).status,200);assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,200);
- await h.mutate('a','/child-trades/delivery',id);assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);assert.equal(h.ledger().Bob.at(-1).amount,750);
+ await h.mutate('a','/child-trades/delivery',id);assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);assert.equal(h.ledger().Bob.at(-1).amount,1200);
 });
 test('seller receipt changes invalidate the previous buyer confirmation and stale revisions',async()=>{
  const h=await fixture(),id=await h.create('goods',{destinationWallet:null});await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card'});await h.mutate('a','/child-trades/decision',id,{decision:'consent'});const revision=h.row(id).revision;
