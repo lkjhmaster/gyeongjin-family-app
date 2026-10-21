@@ -160,7 +160,7 @@ export async function childTradeLifecycle(req,env,me,json){
     requireTrade(typeof b.dueDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)&&b.dueDate>=day,'대여 상환 예정일을 오늘 이후로 지정해주세요.',400);
    }
    if(b.kind==='repayment'){
-    requireTrade(['free','card'].includes(b.sourceWallet)&&b.sourceWallet===loan.source_wallet&&b.destinationWallet===loan.source_wallet&&!b.allocations,'상환은 대여 당시 용돈 출처와 동일한 자유/카드용돈으로만 가능합니다.',400);
+    requireTrade(['free','card'].includes(b.sourceWallet)&&b.sourceWallet===tables.transactions.find(t=>t.id===loan.transaction_id)?.source_wallet&&b.destinationWallet===tables.transactions.find(t=>t.id===loan.transaction_id)?.source_wallet&&!b.allocations,'상환은 대여 당시 용돈 출처와 동일한 자유/카드용돈으로만 가능합니다.',400);
    }
    const receiptPending=b.kind==='goods'&&!b.destinationWallet;
    const destination=receiptPending?'card':b.destinationWallet;
