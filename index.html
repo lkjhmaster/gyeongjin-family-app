@@ -470,12 +470,22 @@ async function interactMemoryPhoto(id,index,action,value){
   if(action==='comment'){payload.text=value;const reply=window.photoReplyTarget?.[id+'|'+index];if(reply)payload.parentId=reply;}
   if(action==='react')payload.emoji=value;
   if(action==='deleteComment')payload.commentId=value;
+  if(action==='editComment'){payload.commentId=value.id;payload.text=value.text;}
   const response=await api('/api/memories/interact',{method:'POST',body:JSON.stringify(payload)});
   state.memories=response.memories;
   localStorage.setItem('gyeongjin_memories',JSON.stringify(response.memories));
   if(window.photoReplyTarget)delete window.photoReplyTarget[id+'|'+index];
   memories();
  }catch(e){toast(e.message||'반응 저장 실패')}
+}
+function editPhotoComment(id,index,commentId){
+ const memory=(state.memories||[]).find(x=>x.id===id);
+ const comment=memory?.interactions?.[String(index)]?.comments?.find(x=>x.id===commentId);
+ if(!comment)return toast('댓글을 찾을 수 없습니다');
+ const next=prompt('댓글 수정',comment.text);
+ if(next===null||next.trim()===comment.text)return;
+ if(!next.trim()||next.trim().length>500)return toast('댓글은 1~500자입니다');
+ interactMemoryPhoto(id,index,'editComment',{id:commentId,text:next.trim()});
 }
 function setPhotoReply(id,index,parentId,name){window.photoReplyTarget=window.photoReplyTarget||{};window.photoReplyTarget[id+'|'+index]=parentId;const input=document.getElementById('photoComment_'+id+'_'+index);if(input){input.placeholder=name+'에게 답글...';input.focus();}}
 function memoryPhotoDiscussion(m,index){
@@ -491,7 +501,7 @@ function memoryPhotoDiscussion(m,index){
  return thread.map((msg,i)=>{
  const mine=msg.author===currentAccount?.name,canDelete=mine||currentAccount?.isAdmin===true;
  const name=JSON.stringify(msg.author||'가족').replace(/"/g,'&quot;');
- return '<div style="font-size:13px;padding:7px 4px;'+(i?'margin-left:22px;border-left:2px solid #ddd;padding-left:10px;':'')+'"><small>'+esc(msg.author||'가족')+' · '+esc(msg.createdAt?new Date(msg.createdAt).toLocaleString('ko-KR'):'')+'</small><div style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(msg.text||'')+'</div><button class="ghost" style="padding:2px 6px" onclick="setPhotoReply('+id+','+index+','+JSON.stringify(c.id).replace(/"/g,'&quot;')+','+name+')">답글</button>'+(canDelete?' <button class="ghost" style="padding:2px 6px" onclick="interactMemoryPhoto('+id+','+index+',\'deleteComment\','+JSON.stringify(msg.id).replace(/"/g,'&quot;')+')">삭제</button>':'')+'</div>';
+ return '<div style="font-size:13px;padding:7px 4px;'+(i?'margin-left:22px;border-left:2px solid #ddd;padding-left:10px;':'')+'"><small>'+esc(msg.author||'가족')+' · '+esc(msg.createdAt?new Date(msg.createdAt).toLocaleString('ko-KR'):'')+'</small>'+(msg.editedAt?' <small>(수정됨)</small>':'')+'<div style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(msg.text||'')+'</div><button class="ghost" style="padding:2px 6px" onclick="setPhotoReply('+id+','+index+','+JSON.stringify(c.id).replace(/"/g,'&quot;')+','+name+')">답글</button>'+(canDelete?' <button class="ghost" style="padding:2px 6px" onclick="editPhotoComment('+id+','+index+','+JSON.stringify(msg.id).replace(/"/g,'&quot;')+')">수정</button> <button class="ghost" style="padding:2px 6px" onclick="interactMemoryPhoto('+id+','+index+',\'deleteComment\','+JSON.stringify(msg.id).replace(/"/g,'&quot;')+')">삭제</button>':'')+'</div>';
  }).join('');
  }).join('')+'</div><div style="display:flex;gap:5px"><input maxlength="500" id="photoComment_'+m.id+'_'+index+'" placeholder="댓글 남기기" style="flex:1;min-width:0"><button class="secondary" onclick="(function(){const el=document.getElementById(\'photoComment_'+m.id+'_'+index+'\');if(el.value.trim())interactMemoryPhoto('+id+','+index+',\'comment\',el.value)})()">등록</button></div></div>';
 }
