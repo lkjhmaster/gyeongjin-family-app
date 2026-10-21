@@ -54,13 +54,16 @@ test('real SQLite: family and role isolation, debt blocks new borrowing, due-dat
  const r=await h.call('a','/child-trades',{kind:'loan',counterpartyId:'c',gross:100,sourceWallet:'card',destinationWallet:'card',dueDate:'2099-12-31',operationKey:crypto.randomUUID()});assert.equal(r.status,409);
  const before=h.ledger();assert.equal((await h.call('a','/child-trades/notifications')).data.overdue.length,0);assert.deepEqual(h.ledger(),before);
 });
-test('real SQLite: minus debt receives net repayment and refund restores the same debt capacity',async()=>{
- const h=await fixture(),ledger=h.ledger();ledger.Bob.push({id:'debt-b',type:'expense',wallet:'minus',amount:2000,status:'approved',debtOrigin:'free'});
- h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
- const id=await h.create('goods',{gross:1001,destinationWallet:'minus',destinationDebtId:'debt-b'});await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
- assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');assert.equal(h.ledger().Bob.at(-1).amount,500);
- assert.equal((await h.action(id,'cancel')).status,200);assert.equal(h.ledger().Bob.at(-1).type,'expense');assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');
- const next=await h.create('goods',{gross:4000,destinationWallet:'minus',destinationDebtId:'debt-b'});await h.approve(next);await h.mutate('a','/child-trades/delivery',next);assert.equal((await h.mutate('b','/child-trades/delivery',next)).status,200);
+test('minus-funded purchase requires card receipt and charges zero fee',async()=>{
+ const h=await fixture();
+ for(const destinationWallet of ['free','minus']){
+  const result=await h.call('a','/child-trades',{kind:'goods',counterpartyId:'b',gross:1000,sourceWallet:'minus',destinationWallet,operationKey:crypto.randomUUID()});
+  assert.equal(result.status,400);
+ }
+ const id=await h.create('goods',{gross:1000,sourceWallet:'minus',destinationWallet:'card'});
+ assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1000);
+ await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
+ assert.equal(h.ledger().Bob.at(-1).wallet,'card');assert.equal(h.ledger().Bob.at(-1).amount,1000);
 });
 test('real SQLite: seller changes destination, buyer must reconsent; stale revisions fail',async()=>{
  const h=await fixture(),id=await h.create('goods');const revision=h.row(id).revision;
@@ -166,10 +169,14 @@ test('cumulative wallet refunds are monotonic and exact even at one-won boundari
   sums.forEach((s,i)=>assert.deepEqual(s,{gross:parts[i].gross,fee:parts[i].fee}));
  }
 });
-test('split receipt can repay a minus debt using each source wallet fee policy',async()=>{
- const h=await fixture(),ledger=h.ledger();ledger.Bob.push({id:'minus-goods',type:'expense',wallet:'minus',amount:2000,status:'approved',debtOrigin:'free'});h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
- const id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:'minus',destinationDebtId:'minus-goods'});await h.approve(id);await h.mutate('a','/child-trades/delivery',id);assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);assert.equal(h.ledger().Bob.at(-1).amount,750);assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'minus-goods');
- assert.equal((await h.action(id,'cancel')).status,200);assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'minus-goods');assert.equal(h.ledger().Bob.at(-1).amount,750);
+test('mixed purchase including minus requires card receipt and zero fee',async()=>{
+ const h=await fixture();
+ const denied=await h.call('a','/child-trades',{kind:'goods',counterpartyId:'b',gross:1200,sourceWallet:'free',allocations:split,destinationWallet:'free',operationKey:crypto.randomUUID()});
+ assert.equal(denied.status,400);
+ const id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:'card'});
+ assert.equal(h.row(id).fee_amount,0);
+ await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
+ assert.equal(h.ledger().Bob.at(-1).wallet,'card');assert.equal(h.ledger().Bob.at(-1).amount,1200);
 });
 test('buyer omits receipt inputs; seller selects receipt and buyer confirms final fees before approval',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
@@ -185,12 +192,11 @@ test('seller receipt changes invalidate the previous buyer confirmation and stal
  await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'free'});assert.equal(h.row(id).status,'requested');assert.equal((await h.call('p','/child-trades/approval/approve',{transactionId:id,revision})).status,409);assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,409);
  assert.equal((await h.mutate('a','/child-trades/decision',id,{decision:'consent'})).status,200);assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,200);
 });
-test('seller minus receipt can use only the sellers own debt with sufficient remaining capacity',async()=>{
- const h=await fixture(),ledger=h.ledger();ledger.Alice.push({id:'buyer-debt',wallet:'minus',type:'expense',amount:3000,status:'approved',debtOrigin:'card'});ledger.Bob.push({id:'seller-debt',wallet:'minus',type:'expense',amount:1000,status:'approved',debtOrigin:'free'});h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
- const id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
- assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'minus',destinationDebtId:'buyer-debt'})).status,409);
- assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'minus',destinationDebtId:'seller-debt'})).status,200);assert.equal(h.row(id).net_amount,750);
- assert.equal((await h.mutate('a','/child-trades/terms',id,{gross:1200,allocations:split,sourceWallet:'free',destinationWallet:'card'})).status,403);
+test('seller cannot choose minus or free receipt for mixed minus-funded goods',async()=>{
+ const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
+ for(const destinationWallet of ['minus','free'])assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet})).status,400);
+ assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card'})).status,200);
+ assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1200);
 });
 test('child inbox exposes only their own actionable requests and removes processed consent',async()=>{
  const h=await fixture(),id=await h.create();
