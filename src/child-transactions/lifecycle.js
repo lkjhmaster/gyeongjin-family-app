@@ -85,6 +85,8 @@ export async function childTradeLifecycle(req,env,me,json){
    const fee=parts.reduce((n,p)=>n+p.fee,0);requireTrade(gross-fee>0,'실수령액이 없습니다.',400);
    return {gross,fee,net:gross-fee,parts};
   }
+  const usesMinus=parts=>parts.some(p=>p.wallet==='minus'&&p.gross>0);
+  const enforceGoodsReceipt=(parts,destination)=>requireTrade(!usesMinus(parts)||destination==='card','마이너스용돈이 포함된 구매는 판매자 카드용돈으로만 입금할 수 있습니다.',400);
   const funding=tx=>{const found=tables.funding.filter(f=>f.transaction_id===tx.id);return found.length?wallets.flatMap(wallet=>found.filter(f=>f.wallet===wallet).map(f=>({wallet,gross:f.gross_amount,fee:f.fee_amount,net:f.gross_amount-f.fee_amount}))):[{wallet:tx.source_wallet,gross:tx.gross_amount,fee:tx.fee_amount,net:tx.net_amount}];};
   const held=tx=>{const holds=activeHolds().filter(h=>h.transaction_id===tx.id&&h.status==='active');return holds.length?{gross_amount:holds.reduce((n,h)=>n+h.gross_amount,0)}:null;};
   const setFunding=(tx,parts)=>{add('DELETE FROM child_trade_funding WHERE transaction_id=?',tx.id);for(const p of parts)add("INSERT INTO child_trade_funding(transaction_id,wallet,gross_amount,fee_amount,hold_status) VALUES(?,?,?,?,'planned')",tx.id,p.wallet,p.gross,p.fee);};
@@ -145,6 +147,7 @@ export async function childTradeLifecycle(req,env,me,json){
     requireTrade(['free','card'].includes(b.sourceWallet)&&b.destinationWallet===b.sourceWallet&&!b.allocations,'대여는 자유→자유 또는 카드→카드만 가능합니다. 마이너스 대여는 불가합니다.',400);
     requireTrade(typeof b.dueDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)&&b.dueDate>=day,'대여 상환 예정일을 오늘 이후로 지정해주세요.',400);
    }
+   if(b.kind==='goods'&&b.destinationWallet)enforceGoodsReceipt(fundingInputs('goods',b.gross,b.sourceWallet,b.allocations),b.destinationWallet);
    const receiptPending=b.kind==='goods'&&!b.destinationWallet;
    return json({ok:true,receiptPending,...paymentQuote(b.kind,b.gross,b.sourceWallet,receiptPending?'card':b.destinationWallet,payee,b.destinationDebtId,b.allocations)});
   }
@@ -162,6 +165,7 @@ export async function childTradeLifecycle(req,env,me,json){
    if(b.kind==='repayment'){
     requireTrade(['free','card'].includes(b.sourceWallet)&&b.sourceWallet===tables.transactions.find(t=>t.id===loan.transaction_id)?.source_wallet&&b.destinationWallet===tables.transactions.find(t=>t.id===loan.transaction_id)?.source_wallet&&!b.allocations,'상환은 대여 당시 용돈 출처와 동일한 자유/카드용돈으로만 가능합니다.',400);
    }
+   if(b.kind==='goods'&&b.destinationWallet)enforceGoodsReceipt(fundingInputs('goods',b.gross,b.sourceWallet,b.allocations),b.destinationWallet);
    const receiptPending=b.kind==='goods'&&!b.destinationWallet;
    const destination=receiptPending?'card':b.destinationWallet;
    const payment=paymentQuote(b.kind,b.gross,b.sourceWallet,destination,payee,b.destinationDebtId,b.allocations);const source=payment.parts[0].wallet;
@@ -205,6 +209,7 @@ export async function childTradeLifecycle(req,env,me,json){
    requireTrade(tx.kind==='goods'&&me.id===tx.payee_id&&!me.is_admin,'판매자만 수령 용돈을 선택할 수 있습니다.',403);
    requireTrade(['requested','consented'].includes(tx.status),'부모 승인 전 거래에서 선택해주세요.');
    const parts=funding(tx),payment=paymentQuote('goods',tx.gross_amount,tx.source_wallet,b.destinationWallet,tx.payee_id,b.destinationDebtId,Object.fromEntries(parts.map(p=>[p.wallet,p.gross])));
+   enforceGoodsReceipt(parts,b.destinationWallet);
    receiveCapacity(tx.payee_id,{...tx,destination_wallet:b.destinationWallet},payment.net,b.destinationDebtId);
    if(path==='/receipt/quote')return json({ok:true,...payment});
    add('UPDATE child_trade_transactions SET destination_wallet=?,fee_amount=?,net_amount=? WHERE id=?',b.destinationWallet,payment.fee,payment.net,tx.id);
@@ -216,7 +221,7 @@ export async function childTradeLifecycle(req,env,me,json){
   if(path==='/terms'){
    requireTrade(participant&&!me.is_admin&&['requested','consented'].includes(tx.status),'승인 전 거래 당사자만 조건을 변경할 수 있습니다.',403);
    if(tx.kind==='goods'&&me.id===tx.payer_id)requireTrade(b.destinationWallet===tx.destination_wallet&&(b.destinationDebtId||null)===(detail(tx).destination_debt_id||null),'수령 용돈은 판매자가 선택합니다.',403);
-   const allocations=b.allocations??(tables.funding.some(f=>f.transaction_id===tx.id)?Object.fromEntries(funding(tx).map(p=>[p.wallet,p.gross])):undefined);const payment=paymentQuote(tx.kind,b.gross,b.sourceWallet,b.destinationWallet,tx.payee_id,b.destinationDebtId,allocations);
+   const allocations=b.allocations??(tables.funding.some(f=>f.transaction_id===tx.id)?Object.fromEntries(funding(tx).map(p=>[p.wallet,p.gross])):undefined);const payment=paymentQuote(tx.kind,b.gross,b.sourceWallet,b.destinationWallet,tx.payee_id,b.destinationDebtId,allocations);if(tx.kind==='goods'&&b.destinationWallet)enforceGoodsReceipt(payment.parts,b.destinationWallet);
    add('UPDATE child_trade_transactions SET gross_amount=?,fee_amount=?,net_amount=?,source_wallet=?,destination_wallet=? WHERE id=?',payment.gross,payment.fee,payment.net,payment.parts[0].wallet,b.destinationWallet,tx.id);if(allocations)setFunding(tx,payment.parts);
    add('UPDATE child_trade_details SET destination_debt_id=?,consent_required_id=? WHERE transaction_id=?',b.destinationDebtId||null,me.id===tx.requester_id?tx.counterparty_id:tx.requester_id,tx.id);
    change(tx,'requested');approval(tx,'consent','requester');audit(tx,'terms_changed','requested',{...payment,sourceWallet:b.sourceWallet,destinationWallet:b.destinationWallet});return await commit({ok:true});
