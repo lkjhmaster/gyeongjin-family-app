@@ -87,7 +87,7 @@ export async function childTradeLifecycle(req,env,me,json){
   }
   const usesMinus=parts=>parts.some(p=>p.wallet==='minus'&&p.gross>0);
   const goodsDestination=wallet=>wallet==='free'?'free':'card';
-  const enforceGoodsReceipt=(parts,destination)=>requireTrade(destination==='card'||(destination==='free'&&parts.every(p=>p.wallet==='free')),'판매대금은 자유→자유, 카드·마이너스→카드로 분리 입금됩니다.',400);
+  const enforceGoodsReceipt=(parts,destination)=>requireTrade(destination==='card'||destination==='free','판매대금은 자유→자유, 카드·마이너스→카드로 분리 입금됩니다.',400);
   const funding=tx=>{const found=tables.funding.filter(f=>f.transaction_id===tx.id);return found.length?wallets.flatMap(wallet=>found.filter(f=>f.wallet===wallet).map(f=>({wallet,gross:f.gross_amount,fee:f.fee_amount,net:f.gross_amount-f.fee_amount}))):[{wallet:tx.source_wallet,gross:tx.gross_amount,fee:tx.fee_amount,net:tx.net_amount}];};
   const held=tx=>{const holds=activeHolds().filter(h=>h.transaction_id===tx.id&&h.status==='active');return holds.length?{gross_amount:holds.reduce((n,h)=>n+h.gross_amount,0)}:null;};
   const setFunding=(tx,parts)=>{add('DELETE FROM child_trade_funding WHERE transaction_id=?',tx.id);for(const p of parts)add("INSERT INTO child_trade_funding(transaction_id,wallet,gross_amount,fee_amount,hold_status) VALUES(?,?,?,?,'planned')",tx.id,p.wallet,p.gross,p.fee);};
