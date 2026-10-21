@@ -167,6 +167,14 @@ async function reviewChoreExemption(encoded,id,date,decision){if(currentAccount?
 function choreDailyRequests(){return readJSON('gyeongjin_chore_daily_requests',{})}
 async function submitChoreDay(encoded,automatic=false){const name=decodeURIComponent(encoded),date=localDateKey(),items=choreDayRecords(name,date);if(!choreDayReady(items)){toast('모든 할 일을 완료하거나 면제 승인을 받아야 합니다.');return}if(currentAccount?.isAdmin!==true&&currentAccount?.name!==name){toast('본인의 할 일만 신청할 수 있습니다.');return}const all=choreDailyRequests(),key=name+'|'+date;if(all[key]){toast('이미 하루 보상을 요청했습니다.');return}all[key]={name,date,status:'pending',amount:choreDailyAmount(items),items:items.map(x=>({id:x.id,title:x.title,reward:x.dayRecord.state==='exempt_approved'?0:(Number.isSafeInteger(Number(x.reward))&&Number(x.reward)>0?Number(x.reward):100),state:x.dayRecord.state,reason:x.dayRecord.reason||''})),requestedAt:new Date().toISOString()};localStorage.setItem('gyeongjin_chore_daily_requests',JSON.stringify(all));await pushFamilyStateKey('chore_daily_requests');await addAllowanceAudit('하루 할 일 완료 요청',name,null,all[key]);toast(automatic?'모든 할 일 완료 · 부모 승인요청이 자동 등록됐습니다.':'하루 할 일 완료 승인을 요청했습니다.');if(!automatic)allowanceChild(encoded,localStorage.getItem('gyeongjin_allowance_wallet')||'free')}
 async function approveLateChore(encoded,id,date){if(currentAccount?.isAdmin!==true)return;const name=decodeURIComponent(encoded),item=childChores(name).find(x=>x.id===id);if(!item||date>=localDateKey())return;const reason=prompt('지난 할 일 완료 인정 사유를 입력해주세요 (2자 이상)');if(reason===null)return;if(reason.trim().length<2)return toast('사유를 2자 이상 입력해주세요');let memo='';if(item.memoEnabled){const value=prompt('독서·학습 등 완료 내용을 메모해주세요 (필수)');if(value===null)return;memo=value.trim();if(!memo)return toast('완료 메모가 필요합니다')}try{await api('/api/chores/late-completion',{method:'POST',body:JSON.stringify({name,id,date,reason:reason.trim(),memo})});await pullFamilyState();toast('지난 할 일 완료 인정 · 보상은 자동 지급되지 않습니다');choreDailyDetail(encoded,date)}catch(e){toast(e.message||'완료 인정 실패')}}
+async function correctPastChoreExemption(encoded,id,date){
+ if(currentAccount?.isAdmin!==true)return;
+ const name=decodeURIComponent(encoded),reason=prompt('완료에서 면제로 정정하는 사유 (2자 이상)');
+ if(reason===null)return;
+ if(reason.trim().length<2)return toast('정정 사유를 입력해주세요');
+ if(!confirm('이 할 일을 면제 인정으로 정정하고 해당 보상금을 제외할까요?'))return;
+ try{await api('/api/chores/history/correct',{method:'POST',body:JSON.stringify({name,id,date,state:'exempt_approved',reason:reason.trim()})});await pullFamilyState();toast('면제 정정 완료 · 달성률 유지 · 보상금 제외');choreDailyDetail(encoded,date)}catch(e){toast(e.message||'정정 실패')}
+}
 async function approveLateChoreExemption(encoded,id,date){
  if(currentAccount?.isAdmin!==true)return;
  const name=decodeURIComponent(encoded);
@@ -203,6 +211,7 @@ function choreDailyDetail(encoded,date){
   const details=(x.dayRecord?.reason?'<p class="label">사유: '+esc(x.dayRecord.reason)+'</p>':'')+
    (x.dayRecord?.memo?'<p class="label">완료 메모: '+esc(x.dayRecord.memo)+'</p>':x.memoEnabled&&state==='done'?'<p class="label">완료 메모 없음 · 확인 필요</p>':'')+
    (x.dayRecord?.lateApproved?'<p class="label">인정: '+esc(x.dayRecord.reviewedBy||'')+' · '+esc(x.dayRecord.lateReason||'')+'</p>':'');
+  const correction=past&&state==='done'&&(!req||req.status==='pending')?'<div class="chore-history-actions"><button class="secondary" onclick="correctPastChoreExemption(\''+encoded+'\',\''+id+'\',\''+date+'\')">완료 → 면제 정정</button></div>':'';
   const actions=past&&!['done','exempt_requested','exempt_approved'].includes(state)
    ?'<div class="chore-history-actions"><button class="secondary" onclick="approveLateChore(\''+encoded+'\',\''+id+'\',\''+date+'\')">완료 인정</button><button class="secondary" onclick="approveLateChoreExemption(\''+encoded+'\',\''+id+'\',\''+date+'\')">미수행 인정</button></div>'
    :state==='exempt_requested'?'<div class="chore-history-actions"><button class="secondary" onclick="reviewChoreExemption(\''+encoded+'\',\''+id+'\',\''+date+'\',\'approve\')">면제 승인</button><button class="ghost" onclick="reviewChoreExemption(\''+encoded+'\',\''+id+'\',\''+date+'\',\'reject\')">거절</button></div>':'';
