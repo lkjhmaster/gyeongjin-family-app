@@ -81,12 +81,13 @@ export async function childTradeLifecycle(req,env,me,json){
   }
   function paymentQuote(kind,gross,source,dest,owner,debtId,allocations){
    let parts;try{parts=fundingInputs(kind,gross,source,allocations)}catch(e){throw new TradeError(e.message,400)}
-   parts=parts.map(p=>({...p,...quote(p.gross,p.wallet,dest,owner,debtId,true)}));
+   parts=parts.map(p=>({...p,...quote(p.gross,p.wallet,kind==='goods'?goodsDestination(p.wallet):dest,owner,kind==='goods'?null:debtId,true)}));
    const fee=parts.reduce((n,p)=>n+p.fee,0);requireTrade(gross-fee>0,'실수령액이 없습니다.',400);
    return {gross,fee,net:gross-fee,parts};
   }
   const usesMinus=parts=>parts.some(p=>p.wallet==='minus'&&p.gross>0);
-  const enforceGoodsReceipt=(parts,destination)=>requireTrade(!usesMinus(parts)||destination==='card','마이너스용돈이 포함된 구매는 판매자 카드용돈으로만 입금할 수 있습니다.',400);
+  const goodsDestination=wallet=>wallet==='free'?'free':'card';
+  const enforceGoodsReceipt=(parts,destination)=>requireTrade(destination==='card'||(destination==='free'&&parts.every(p=>p.wallet==='free')),'판매대금은 자유→자유, 카드·마이너스→카드로 분리 입금됩니다.',400);
   const funding=tx=>{const found=tables.funding.filter(f=>f.transaction_id===tx.id);return found.length?wallets.flatMap(wallet=>found.filter(f=>f.wallet===wallet).map(f=>({wallet,gross:f.gross_amount,fee:f.fee_amount,net:f.gross_amount-f.fee_amount}))):[{wallet:tx.source_wallet,gross:tx.gross_amount,fee:tx.fee_amount,net:tx.net_amount}];};
   const held=tx=>{const holds=activeHolds().filter(h=>h.transaction_id===tx.id&&h.status==='active');return holds.length?{gross_amount:holds.reduce((n,h)=>n+h.gross_amount,0)}:null;};
   const setFunding=(tx,parts)=>{add('DELETE FROM child_trade_funding WHERE transaction_id=?',tx.id);for(const p of parts)add("INSERT INTO child_trade_funding(transaction_id,wallet,gross_amount,fee_amount,hold_status) VALUES(?,?,?,?,'planned')",tx.id,p.wallet,p.gross,p.fee);};
@@ -109,7 +110,8 @@ export async function childTradeLifecycle(req,env,me,json){
     posting(tx,tx.payer_id,part.wallet,-part.gross,'debit');
     posting(tx,'fee:'+me.family_id,part.wallet,part.fee,'fee');
    }
-   posting(tx,tx.payee_id,tx.destination_wallet,tx.net_amount,tx.destination_wallet==='minus'?'minus_repayment':'credit',null,detail(tx).destination_debt_id);
+   if(tx.kind==='goods'){for(const part of funding(tx))posting(tx,tx.payee_id,goodsDestination(part.wallet),part.net,'credit');}
+   else posting(tx,tx.payee_id,tx.destination_wallet,tx.net_amount,tx.destination_wallet==='minus'?'minus_repayment':'credit',null,detail(tx).destination_debt_id);
   }
   async function commit(result,status=200){
    if(ledgerChanged)add("INSERT INTO family_state(family_id,state_key,value_json,updated_by) VALUES(?,'allowance_ledger',?,?) ON CONFLICT(family_id,state_key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP,updated_by=excluded.updated_by",me.family_id,JSON.stringify(ledger),me.id);
@@ -321,12 +323,14 @@ export async function childTradeLifecycle(req,env,me,json){
     requireTrade(amount(gross)&&gross<=tx.gross_amount-refunded,'누적 환불액이 원거래를 초과합니다.');
     const refunds=fundingRefund(funding(tx),refunded,refunded+gross);const fee=refunds.reduce((n,p)=>n+p.fee,0),net=gross-fee;
     Object.assign(payload,{refundParts:refunds,refundFee:fee,refundNet:net});
-    if(available(tx.payee_id,tx.destination_wallet)<net){if(tx.kind==='loan')add("UPDATE child_trade_loans SET status='disputed' WHERE transaction_id=?",tx.id);change(tx,'disputed');audit(tx,'refund_insufficient_balance','disputed',{actionId:open.id,resumeStatus:tx.status});return await commit({ok:true,status:'disputed',message:'회수 잔액이 부족하여 부모 조정 상태로 전환했습니다.'});}
+    const receiptRefunds=tx.kind==='goods'?refunds.map(p=>({...p,receiptWallet:goodsDestination(p.wallet)})):[{net,receiptWallet:tx.destination_wallet}];
+    if(receiptRefunds.some(p=>available(tx.payee_id,p.receiptWallet)<p.net)){if(tx.kind==='loan')add("UPDATE child_trade_loans SET status='disputed' WHERE transaction_id=?",tx.id);change(tx,'disputed');audit(tx,'refund_insufficient_balance','disputed',{actionId:open.id,resumeStatus:tx.status});return await commit({ok:true,status:'disputed',message:'회수 잔액이 부족하여 부모 조정 상태로 전환했습니다.'});}
     const original=await all("SELECT * FROM child_trade_postings WHERE transaction_id=? AND kind IN ('debit','credit','minus_repayment','fee')",tx.id);
     const credit=original.find(p=>p.kind==='credit'||p.kind==='minus_repayment');requireTrade(credit&&refunds.every(r=>original.some(p=>p.kind==='debit'&&p.wallet===r.wallet)),'원거래 분개가 없습니다.');
     if(tx.kind==='loan'){const loan=loanFor(tx);requireTrade(loan&&net<=loan.outstanding_amount,'이미 상환된 원금은 대여 환불로 줄일 수 없습니다.');add("UPDATE child_trade_loans SET outstanding_amount=outstanding_amount-?,status=CASE WHEN outstanding_amount=? THEN 'settled' ELSE 'active' END WHERE id=?",net,net,loan.id);}
     if(tx.kind==='repayment'){const loan=tables.loans.find(l=>l.id===detail(tx).loan_id);requireTrade(loan&&loan.outstanding_amount+net<=loan.principal_amount,'복원할 원금 오류');add("UPDATE child_trade_loans SET outstanding_amount=outstanding_amount+?,status=CASE WHEN status='disputed' THEN 'disputed' ELSE 'active' END WHERE id=?",net,loan.id);add("UPDATE child_trade_transactions SET status=CASE WHEN status='disputed' THEN 'disputed' ELSE 'active' END,revision=revision+1,updated_at=? WHERE id=?",now,loan.transaction_id);}
-    posting(tx,tx.payee_id,tx.destination_wallet,-net,'refund',credit.id,tx.destination_wallet==='minus'?detail(tx).destination_debt_id:null);for(const part of refunds){const debit=original.find(p=>p.kind==='debit'&&p.wallet===part.wallet),feePosting=original.find(p=>p.kind==='fee'&&p.wallet===part.wallet);posting(tx,tx.payer_id,part.wallet,part.gross,'refund',debit.id,part.wallet==='minus'?debit.id:null);posting(tx,'fee:'+me.family_id,part.wallet,-part.fee,'refund',feePosting?.id||null);}
+    if(tx.kind==='goods'){for(const part of refunds){const receiptWallet=goodsDestination(part.wallet),receipt=original.find(p=>p.kind==='credit'&&p.wallet===receiptWallet);requireTrade(receipt,'원거래 수령 분개가 없습니다.');posting(tx,tx.payee_id,receiptWallet,-part.net,'refund',receipt.id);}}
+    else posting(tx,tx.payee_id,tx.destination_wallet,-net,'refund',credit.id,tx.destination_wallet==='minus'?detail(tx).destination_debt_id:null);for(const part of refunds){const debit=original.find(p=>p.kind==='debit'&&p.wallet===part.wallet),feePosting=original.find(p=>p.kind==='fee'&&p.wallet===part.wallet);posting(tx,tx.payer_id,part.wallet,part.gross,'refund',debit.id,part.wallet==='minus'?debit.id:null);posting(tx,'fee:'+me.family_id,part.wallet,-part.fee,'refund',feePosting?.id||null);}
     add('UPDATE child_trade_details SET refunded_gross=refunded_gross+? WHERE transaction_id=?',gross,tx.id);
     next=refunded+gross===tx.gross_amount?'cancelled':(payload.resumeStatus||tx.status);
     if(tx.kind==='loan'&&loanFor(tx).outstanding_amount===net&&next!=='cancelled')next='settled';
