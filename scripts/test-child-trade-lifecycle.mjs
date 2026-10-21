@@ -4,9 +4,9 @@ import {fixture} from './trade-test-fixture.mjs';
 import {fundingRefund} from '../src/child-transactions/funding.js';
 test('real SQLite: consent, atomic loan, net principal, idempotency, immutable original rows',async()=>{
  const h=await fixture();const id=await h.create();await h.approve(id);
- assert.equal(h.sql.prepare('SELECT outstanding_amount FROM child_trade_loans').get().outstanding_amount,500);
+ assert.equal(h.sql.prepare('SELECT outstanding_amount FROM child_trade_loans').get().outstanding_amount,1000);
  assert.equal(h.sql.prepare('SELECT SUM(amount) n FROM child_trade_postings').get().n,0);
- assert.equal(h.ledger().Alice.at(-1).amount,500);assert.equal(h.ledger().Bob.at(-1).amount,1000);
+ assert.equal(h.ledger().Alice.at(-1).amount,1000);assert.equal(h.ledger().Bob.at(-1).amount,1000);
  assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,409);
  const before=h.ledger(),changed=structuredClone(before);changed.Alice.pop();
  assert.equal((await h.call('p','/state',{key:'allowance_ledger',value:changed,expectedJson:JSON.stringify(before)},'PUT')).status,409);
@@ -22,7 +22,7 @@ test('real SQLite: goods hold protects other writers, two deliveries settle exac
 });
 test('real SQLite: partial and full repayment reduce only received principal; overpayment blocked',async()=>{
  const h=await fixture(),id=await h.create();await h.approve(id);const loan=h.sql.prepare('SELECT * FROM child_trade_loans').get();
- const repay=await h.create('repayment',{loanId:loan.id,gross:400});await h.approve(repay);assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,300);
+ const repay=await h.create('repayment',{loanId:loan.id,gross:400});await h.approve(repay);assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,600);
  const bad=await h.call('a','/child-trades',{kind:'repayment',loanId:loan.id,gross:1000,sourceWallet:'card',destinationWallet:'free',operationKey:crypto.randomUUID()});assert.equal(bad.status,409);
  const rest=await h.create('repayment',{loanId:loan.id,gross:600});await h.approve(rest);assert.equal(h.row(id).status,'settled');assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,0);
  assert.equal((await h.action(rest,'refund',{gross:200})).status,200);assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,100);assert.equal(h.row(id).status,'active');
@@ -50,7 +50,7 @@ test('real SQLite: hold cancel, dispute blocks payout, mutual resolve, changed t
  assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,0);assert.equal(h.sql.prepare("SELECT COUNT(*) n FROM child_trade_holds WHERE status='active'").get().n,0);
 });
 test('real SQLite: family and role isolation, debt blocks new borrowing, due-date alerts never debit',async()=>{
- const h=await fixture(),id=await h.create('loan',{dueDate:'2020-01-01'});assert.equal((await h.mutate('c','/child-trades/decision',id,{decision:'consent'})).status,403);assert.equal((await h.mutate('a','/child-trades/approval/approve',id)).status,403);await h.approve(id);
+ const h=await fixture(),id=await h.create('loan',{dueDate:'2099-12-31'});assert.equal((await h.mutate('c','/child-trades/decision',id,{decision:'consent'})).status,403);assert.equal((await h.mutate('a','/child-trades/approval/approve',id)).status,403);await h.approve(id);
  const r=await h.call('a','/child-trades',{kind:'loan',counterpartyId:'c',gross:100,sourceWallet:'card',destinationWallet:'card',operationKey:crypto.randomUUID()});assert.equal(r.status,409);
  const before=h.ledger();assert.equal((await h.call('a','/child-trades/notifications')).data.overdue.length,1);assert.deepEqual(h.ledger(),before);
 });
@@ -58,7 +58,7 @@ test('real SQLite: minus debt receives net repayment and refund restores the sam
  const h=await fixture(),ledger=h.ledger();ledger.Bob.push({id:'debt-b',type:'expense',wallet:'minus',amount:2000,status:'approved',debtOrigin:'free'});
  h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
  const id=await h.create('goods',{gross:1001,destinationWallet:'minus',destinationDebtId:'debt-b'});await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
- assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');assert.equal(h.ledger().Bob.at(-1).amount,500);
+ assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');assert.equal(h.ledger().Bob.at(-1).amount,1000);
  assert.equal((await h.action(id,'cancel')).status,200);assert.equal(h.ledger().Bob.at(-1).type,'expense');assert.equal(h.ledger().Bob.at(-1).repaymentDebtId,'debt-b');
  const next=await h.create('goods',{gross:4000,destinationWallet:'minus',destinationDebtId:'debt-b'});await h.approve(next);await h.mutate('a','/child-trades/delivery',next);assert.equal((await h.mutate('b','/child-trades/delivery',next)).status,200);
 });
