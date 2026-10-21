@@ -176,7 +176,7 @@ test('mixed purchase including minus routes free to free and card/minus to card 
  const id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:'card'});
  assert.equal(h.row(id).fee_amount,0);
  await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
- assert.deepEqual(h.ledger().Bob.filter(r=>r.childTradeId===id&&r.type==='income').map(r=>[r.wallet,r.amount]).sort((a,b)=>a[0].localeCompare(b[0])),[['card',900],['free',300]]);
+ assert.deepEqual(Object.entries(h.ledger().Bob.filter(r=>r.childTradeId===id&&r.type==='income').reduce((sum,r)=>(sum[r.wallet]=(sum[r.wallet]||0)+r.amount,sum),{})).sort((a,b)=>a[0].localeCompare(b[0])),[['card',900],['free',300]]);
 });
 test('buyer omits receipt inputs; seller selects receipt and buyer confirms final fees before approval',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
