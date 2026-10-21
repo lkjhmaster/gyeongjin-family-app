@@ -277,6 +277,32 @@ if(url.pathname==="/api/chores/late-completion"&&req.method==="POST"){
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,note:"완료 인정 기록만 저장되었습니다. 보상금은 자동 지급되지 않습니다."});
 }
+if(url.pathname==="/api/chores/history/correct"&&req.method==="POST"){
+ if(!me.is_admin)return json({error:"관리자 전용"},403);
+ const b=await body(req),reason=String(b.reason||"").trim(),date=String(b.date||"");
+ if(typeof b.name!=="string"||typeof b.id!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date>=new Date().toISOString().slice(0,10)||reason.length<2||reason.length>500||b.state!=="exempt_approved")return json({error:"수정 입력 오류"},400);
+ const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();
+ if(!member)return json({error:"자녀 계정이 아닙니다."},403);
+ const key=b.name+"|"+date;
+ const saved=await Promise.all(["chores","chore_daily_requests","allowance_ledger"].map(k=>env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key=?").bind(me.family_id,k).first()));
+ if(saved.some(x=>!x))return json({error:"기록 없음"},409);
+ const [chores,requests,ledger]=saved.map(x=>JSON.parse(x.value_json));
+ const item=chores[b.name]?.find(x=>x.id===b.id),previous=item?.dayRecords?.[date];
+ if(!item||previous?.state!=="done")return json({error:"완료 처리된 할 일만 면제로 정정할 수 있습니다."},409);
+ if(requests[key]&&requests[key].status!=="pending")return json({error:"이미 승인·거절된 보상요청이 있습니다. 지급 정정 절차를 이용하세요."},409);
+ const rows=ledger[b.name]||[],paymentKey="daily_chore|"+key;
+ if(rows.some(x=>x.id===paymentKey||x.di?.dailyKey===paymentKey||x.status==="approved"&&x.type==="income"&&x.wallet==="free"&&x.date===date&&/할.?일|보상|수동/.test(String(x.title||""))))return json({error:"지급 내역이 있어 정정을 차단했습니다."},409);
+ const at=new Date().toISOString();
+ item.dayRecords[date]={...previous,state:"exempt_approved",lateExempt:true,reason,reviewedBy:me.name,reviewedAt:at,correction:{from:"done",to:"exempt_approved",reason,actor:me.name,at}};
+ const reqRow=requests[key];
+ if(reqRow){const target=reqRow.items?.find(x=>x.id===b.id);if(target){target.state="exempt_approved";target.reward=0;target.reason=reason}reqRow.amount=(reqRow.items||[]).reduce((n,x)=>n+Number(x.reward||0),0);reqRow.corrections=[...(reqRow.corrections||[]),{id:b.id,from:"done",to:"exempt_approved",reason,actor:me.name,at}]}
+ const nextChores=JSON.stringify(chores),nextRequests=JSON.stringify(requests);
+ const ops=[env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chores' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?) AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?)").bind(nextChores,me.family_id,saved[0].value_json,me.family_id,saved[1].value_json,me.family_id,saved[2].value_json)];
+ if(reqRow)ops.push(env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chores' AND value_json=?)").bind(nextRequests,me.family_id,saved[1].value_json,me.family_id,nextChores));
+ const guarded=ops.flatMap(op=>[op,env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END")]);
+ try{await env.DB.batch(guarded)}catch{return json({error:"동시 수정 충돌"},409)}
+ return json({ok:true,amount:reqRow?.amount??null});
+}
 if(url.pathname==="/api/chores/late-exemption"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),reason=String(b.reason||"").trim();
