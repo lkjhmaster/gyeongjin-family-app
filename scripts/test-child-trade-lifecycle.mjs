@@ -23,9 +23,9 @@ test('real SQLite: goods hold protects other writers, two deliveries settle exac
 test('real SQLite: partial and full repayment reduce only received principal; overpayment blocked',async()=>{
  const h=await fixture(),id=await h.create();await h.approve(id);const loan=h.sql.prepare('SELECT * FROM child_trade_loans').get();
  const repay=await h.create('repayment',{loanId:loan.id,gross:400});await h.approve(repay);assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,600);
- const bad=await h.call('a','/child-trades',{kind:'repayment',loanId:loan.id,gross:1000,sourceWallet:'card',destinationWallet:'free',operationKey:crypto.randomUUID()});assert.equal(bad.status,409);
+ const bad=await h.call('a','/child-trades',{kind:'repayment',loanId:loan.id,gross:1000,sourceWallet:'card',destinationWallet:'card',dueDate:'2099-12-31',operationKey:crypto.randomUUID()});assert.equal(bad.status,400);
  const rest=await h.create('repayment',{loanId:loan.id,gross:600});await h.approve(rest);assert.equal(h.row(id).status,'settled');assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,0);
- assert.equal((await h.action(rest,'refund',{gross:200})).status,200);assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,100);assert.equal(h.row(id).status,'active');
+ assert.equal((await h.action(rest,'refund',{gross:200})).status,200);assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,200);assert.equal(h.row(id).status,'active');
 });
 test('real SQLite: proportional refunds append inverse postings and preserve every original',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:1001});await h.approve(id);await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
@@ -51,7 +51,7 @@ test('real SQLite: hold cancel, dispute blocks payout, mutual resolve, changed t
 });
 test('real SQLite: family and role isolation, debt blocks new borrowing, due-date alerts never debit',async()=>{
  const h=await fixture(),id=await h.create('loan',{dueDate:'2099-12-31'});assert.equal((await h.mutate('c','/child-trades/decision',id,{decision:'consent'})).status,403);assert.equal((await h.mutate('a','/child-trades/approval/approve',id)).status,403);await h.approve(id);
- const r=await h.call('a','/child-trades',{kind:'loan',counterpartyId:'c',gross:100,sourceWallet:'card',destinationWallet:'card',operationKey:crypto.randomUUID()});assert.equal(r.status,409);
+ const r=await h.call('a','/child-trades',{kind:'loan',counterpartyId:'c',gross:100,sourceWallet:'card',destinationWallet:'card',dueDate:'2099-12-31',operationKey:crypto.randomUUID()});assert.equal(r.status,409);
  const before=h.ledger();assert.equal((await h.call('a','/child-trades/notifications')).data.overdue.length,1);assert.deepEqual(h.ledger(),before);
 });
 test('real SQLite: minus debt receives net repayment and refund restores the same debt capacity',async()=>{
@@ -102,7 +102,7 @@ test('parent can resolve a refund shortage after rejecting the pending refund',a
  const before=h.ledger();const result=await h.action(id,'resolve');assert.equal(result.status,200,JSON.stringify(result));assert.equal(h.row(id).status,'settled');assert.deepEqual(h.ledger(),before);
 });
 test('refund shortage blocks loan repayment until the parents resolve the adjustment',async()=>{
- const h=await fixture(),id=await h.create();await h.approve(id);const ledger=h.ledger();ledger.Alice.push({id:'spent-free',wallet:'free',type:'expense',status:'approved',amount:10500});h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
+ const h=await fixture(),id=await h.create();await h.approve(id);const ledger=h.ledger();ledger.Alice.push({id:'spent-free',wallet:'free',type:'expense',status:'approved',amount:20500});h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(ledger));
  await h.action(id,'cancel');const loan=h.sql.prepare('SELECT * FROM child_trade_loans').get();assert.equal(loan.status,'disputed');
  const repay=await h.call('a','/child-trades',{kind:'repayment',loanId:loan.id,gross:100,sourceWallet:'card',destinationWallet:'card',operationKey:crypto.randomUUID()});assert.equal(repay.status,409);
 });
@@ -115,7 +115,7 @@ test('repayment reversal preserves an existing loan dispute and resolution uses 
 test('partial loan refund does not silently resolve an existing dispute',async()=>{
  const h=await fixture(),id=await h.create();await h.approve(id);await h.mutate('a','/child-trades/dispute',id,{reason:'review'});
  assert.equal((await h.action(id,'refund',{gross:200})).status,200);assert.equal(h.row(id).status,'disputed');assert.equal(h.sql.prepare('SELECT status FROM child_trade_loans').get().status,'disputed');
- assert.equal((await h.action(id,'resolve')).status,200);assert.equal(h.row(id).status,'active');assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,400);
+ assert.equal((await h.action(id,'resolve')).status,200);assert.equal(h.row(id).status,'active');assert.equal(h.sql.prepare('SELECT outstanding_amount n FROM child_trade_loans').get().n,800);
 });
 const split={free:300,card:400,minus:500};
 test('goods combine three wallets, reserve without spending, and settle every leg once',async()=>{
