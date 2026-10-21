@@ -141,6 +141,10 @@ export async function childTradeLifecycle(req,env,me,json){
   if(path==='/quote'&&req.method==='POST'){
    requireTrade(child(me.id)&&child(b.counterpartyId)&&b.counterpartyId!==me.id,'자녀 거래 상대방을 확인해주세요.',403);
    const payee=b.kind==='loan'?me.id:b.counterpartyId;
+   if(b.kind==='loan'){
+    requireTrade(['free','card'].includes(b.sourceWallet)&&b.destinationWallet===b.sourceWallet&&!b.allocations,'대여는 자유→자유 또는 카드→카드만 가능합니다. 마이너스 대여는 불가합니다.',400);
+    requireTrade(typeof b.dueDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)&&b.dueDate>=day,'대여 상환 예정일을 오늘 이후로 지정해주세요.',400);
+   }
    const receiptPending=b.kind==='goods'&&!b.destinationWallet;
    return json({ok:true,receiptPending,...paymentQuote(b.kind,b.gross,b.sourceWallet,receiptPending?'card':b.destinationWallet,payee,b.destinationDebtId,b.allocations)});
   }
@@ -151,6 +155,13 @@ export async function childTradeLifecycle(req,env,me,json){
    if(b.kind==='repayment'){loan=tables.loans.find(l=>l.id===b.loanId&&l.borrower_id===me.id&&l.status==='active'&&l.outstanding_amount>0);requireTrade(loan,'상환할 대여금을 찾을 수 없습니다.');other=loan.lender_id;}
    requireTrade(child(other)&&other!==me.id,'다른 자녀를 선택해주세요.',403);
    const payer=b.kind==='loan'?other:me.id,payee=b.kind==='loan'?me.id:other;
+   if(b.kind==='loan'){
+    requireTrade(['free','card'].includes(b.sourceWallet)&&b.destinationWallet===b.sourceWallet&&!b.allocations,'대여는 자유→자유 또는 카드→카드만 가능합니다. 마이너스 대여는 불가합니다.',400);
+    requireTrade(typeof b.dueDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate)&&b.dueDate>=day,'대여 상환 예정일을 오늘 이후로 지정해주세요.',400);
+   }
+   if(b.kind==='repayment'){
+    requireTrade(['free','card'].includes(b.sourceWallet)&&b.sourceWallet===loan.source_wallet&&b.destinationWallet===loan.source_wallet&&!b.allocations,'상환은 대여 당시 용돈 출처와 동일한 자유/카드용돈으로만 가능합니다.',400);
+   }
    const receiptPending=b.kind==='goods'&&!b.destinationWallet;
    const destination=receiptPending?'card':b.destinationWallet;
    const payment=paymentQuote(b.kind,b.gross,b.sourceWallet,destination,payee,b.destinationDebtId,b.allocations);const source=payment.parts[0].wallet;
