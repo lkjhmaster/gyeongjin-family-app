@@ -189,7 +189,7 @@ test('seller consent sends goods directly to parent queue without buyer reconfir
  assert.equal(h.row(id).status,'consented');
  const queue=(await h.call('p','/child-trades/approval-queue')).data;
  assert.ok(queue.transactions.some(t=>t.id===id));
- assert.equal((await h.mutate('a','/child-trades/decision',id,{decision:'consent'})).status,409);
+ assert.equal((await h.mutate('a','/child-trades/decision',id,{decision:'consent'})).status,403);
  assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,200);
  await h.mutate('a','/child-trades/delivery',id);await h.mutate('b','/child-trades/delivery',id);
  assert.equal(h.ledger().Bob.filter(r=>r.childTradeId===id&&r.type==='income').reduce((n,r)=>n+r.amount,0),1200);
