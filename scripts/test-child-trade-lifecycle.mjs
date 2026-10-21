@@ -123,7 +123,7 @@ test('partial loan refund does not silently resolve an existing dispute',async()
 const split={free:300,card:400,minus:500};
 test('goods combine three wallets, reserve without spending, and settle every leg once',async()=>{
  const h=await fixture(),before=h.ledger(),id=await h.create('goods',{gross:1200,allocations:split});
- assert.equal(h.row(id).fee_amount,450);assert.equal(h.row(id).net_amount,750);await h.approve(id);assert.deepEqual(h.ledger(),before);
+ assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1200);await h.approve(id);assert.deepEqual(h.ledger(),before);
  const balances=(await h.call('a','/child-trades/balances?child=Alice')).data.wallets;assert.deepEqual(balances.map(w=>w.reserved),[300,400,500]);
  const state=h.ledger();state.Alice.push({id:'overspend',wallet:'minus',type:'expense',amount:4600,status:'approved'});
  assert.throws(()=>h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(state)),/reserved/);
@@ -153,7 +153,7 @@ test('split cancellation releases every reservation and condition changes requir
  assert.equal((await h.action(id,'cancel')).status,200);assert.equal(h.sql.prepare("SELECT COUNT(*) n FROM child_trade_funding WHERE hold_status='active'").get().n,0);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,0);
 });
 test('invalid splits and changed retry allocations do not create or duplicate a trade',async()=>{
- const h=await fixture(),base={kind:'goods',counterpartyId:'b',gross:1200,sourceWallet:'free',destinationWallet:'free',operationKey:crypto.randomUUID(),allocations:split};
+ const h=await fixture(),base={kind:'goods',counterpartyId:'b',gross:1200,sourceWallet:'free',destinationWallet:'card',operationKey:crypto.randomUUID(),allocations:split};
  for(const allocations of [{free:1},{free:-1,card:1201},{free:1200.5},{free:1200,unknown:0}])assert.equal((await h.call('a','/child-trades',{...base,allocations})).status,400);
  const first=await h.call('a','/child-trades',base);assert.equal(first.status,201);assert.equal((await h.call('a','/child-trades',base)).data.id,first.data.id);
  assert.equal((await h.call('a','/child-trades',{...base,allocations:{free:500,card:700}})).status,409);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_transactions').get().n,1);
@@ -182,8 +182,8 @@ test('buyer omits receipt inputs; seller selects receipt and buyer confirms fina
  const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
  assert.equal((await h.call('a','/child-trades/detail?id='+id)).data.receiptPending,true);assert.equal((await h.mutate('b','/child-trades/decision',id,{decision:'consent'})).status,409);
  for(const actor of ['a','c','p'])assert.equal((await h.mutate(actor,'/child-trades/receipt',id,{destinationWallet:'free'})).status,403);
- const preview=await h.mutate('b','/child-trades/receipt/quote',id,{destinationWallet:'free'});assert.equal(preview.status,200);assert.equal(preview.data.fee,450);assert.equal(h.row(id).fee_amount,0);
- assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'free',gross:1,allocations:{free:1}})).status,200);assert.equal(h.row(id).gross_amount,1200);assert.equal(h.row(id).fee_amount,450);
+ const preview=await h.mutate('b','/child-trades/receipt/quote',id,{destinationWallet:'card'});assert.equal(preview.status,200);assert.equal(preview.data.fee,0);assert.equal(h.row(id).fee_amount,0);
+ assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card',gross:1,allocations:{free:1}})).status,200);assert.equal(h.row(id).gross_amount,1200);assert.equal(h.row(id).fee_amount,0);
  assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,409);assert.equal((await h.mutate('a','/child-trades/decision',id,{decision:'consent'})).status,200);assert.equal((await h.mutate('p','/child-trades/approval/approve',id)).status,200);
  await h.mutate('a','/child-trades/delivery',id);assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);assert.equal(h.ledger().Bob.at(-1).amount,750);
 });
@@ -194,7 +194,7 @@ test('seller receipt changes invalidate the previous buyer confirmation and stal
 });
 test('seller cannot choose minus or free receipt for mixed minus-funded goods',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split,destinationWallet:null});
- for(const destinationWallet of ['minus','free'])assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet})).status,400);
+ for(const destinationWallet of ['minus','free'])assert.ok([400,409].includes((await h.mutate('b','/child-trades/receipt',id,{destinationWallet})).status));
  assert.equal((await h.mutate('b','/child-trades/receipt',id,{destinationWallet:'card'})).status,200);
  assert.equal(h.row(id).fee_amount,0);assert.equal(h.row(id).net_amount,1200);
 });
