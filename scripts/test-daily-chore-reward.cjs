@@ -19,3 +19,13 @@ test('parent can reverse approved daily payout without deleting original entry',
 test('legacy reward correction preserves the original and adds an idempotent expense',()=>{assert.match(worker,/api\/chores\/legacy\/reverse/);assert.match(worker,/legacy_chore_reward_reversal/);assert.match(worker,/originalAmount/);assert.match(worker,/reverses:b\.id/);assert.match(html,/정정 내역/);assert.match(html,/reverseLegacyChore/)});
 
 test('approved exemptions count toward completion but never pay',()=>{assert.match(html,/\['done','exempt_approved'\]\.includes/);assert.match(html,/x\.dayRecord\?\.state==='exempt_approved'\?0/);assert.match(worker,/x\.dayRecords\?\.\[date\]\?\.state==="exempt_approved"\?0/);assert.match(html,/면제는 달성률에 포함하되 보상금 제외/)});
+
+test('yesterday chore tab expires at 08:00 while preserving audit timestamps',()=>{
+ assert.match(html,/function choreYesterdayWindow\(\)/);
+ assert.match(html,/getHours\(\)<8/);
+ assert.match(html,/어제의 할 일/);
+ assert.match(html,/function selectChoreDay/);
+ assert.match(html,/checkedAt:new Date\(\)\.toISOString\(\)/);
+ assert.match(html,/checkAudit:items\.map/);
+ assert.match(html,/체크 시각:/);
+});
