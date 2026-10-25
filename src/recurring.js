@@ -9,9 +9,9 @@ export async function processRecurringAtomic(env){
   for(let attempt=0;attempt<5;attempt++){
    if(await q('SELECT 1 AS found FROM recurring_expense_runs WHERE recurring_id=? AND period=?',r.id,period).first())break;
    const states=(await q("SELECT state_key,value_json FROM family_state WHERE family_id=? AND state_key IN ('household_ledger','allowance_ledger','allowance_audit') ORDER BY state_key",r.family_id).all()).results||[],map=Object.fromEntries(states.map(s=>[s.state_key,JSON.parse(s.value_json)])),now=new Date().toISOString();
-   const household=map.household_ledger||[];household.push({id:crypto.randomUUID(),date,type:'fixed',amount:Number(r.amount),fixedKind:r.kind,title:r.title,createdBy:'시스템',createdAt:now,recurringId:r.id,period});
+   const household=map.household_ledger||[];const recipient=r.allowance_member_name||null;const shouldCredit=r.kind==='allowance'&&!!recipient;if(r.kind==='allowance'&&!recipient)throw new Error('고정지출 지급 대상 누락: '+r.id);household.push({id:crypto.randomUUID(),date,type:'fixed',amount:Number(r.amount),fixedKind:r.kind,title:r.title,createdBy:'시스템',createdAt:now,recurringId:r.id,period,allowanceMemberName:recipient,allowanceWallet:shouldCredit?'card':null,paymentStatus:shouldCredit?'credited':'expense_only'});
    const values={household_ledger:household};
-   if(r.kind==='allowance'&&r.allowance_member_name){
+   if(shouldCredit){
     const ledger=map.allowance_ledger||{},rows=ledger[r.allowance_member_name]||[];
     const tx={id:crypto.randomUUID(),date,type:'income',wallet:'card',amount:Number(r.amount),title:r.title,status:'approved',requestedBy:'시스템',approvedBy:'시스템',createdAt:now,approvedAt:now,recurringId:r.id,period};
     ledger[r.allowance_member_name]=[...rows,tx];values.allowance_ledger=ledger;
