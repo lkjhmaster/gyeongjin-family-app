@@ -600,6 +600,9 @@ if(b.key==="allowance_audit"){
  let old=[];try{old=JSON.parse(prior?.value_json||"[]")}catch{return json({error:"기존 감사기록 형식 오류"},409)}
  if(!Array.isArray(old))return json({error:"기존 감사기록 형식 오류"},409);
  const existing=new Map(old.filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));
+ const incomingIds=new Set(b.value.filter(x=>x&&x.id!=null).map(x=>String(x.id)));
+ if([...existing.keys()].some(id=>!incomingIds.has(id)))return json({error:"기존 감사기록 삭제는 허용되지 않습니다."},409);
+ if(b.value.length<old.length)return json({error:"감사기록은 누락할 수 없습니다."},409);
  for(const entry of b.value){if(!entry||typeof entry!=='object')return json({error:"감사기록 항목 오류"},400);const previous=entry.id!=null?existing.get(String(entry.id)):null;if(previous&&JSON.stringify(previous)!==JSON.stringify(entry))return json({error:"기존 감사기록은 변경할 수 없습니다."},409)}
  const members=(await env.DB.prepare("SELECT id,name FROM members WHERE family_id=?").bind(me.family_id).all()).results||[];
  const byName=new Map(members.map(x=>[x.name,x.id]));
