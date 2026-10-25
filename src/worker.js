@@ -541,7 +541,7 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
    const value=String(b.text||"").trim();
    if(!value||value.length>500)return json({error:"댓글은 1~500자입니다."},400);
    if(value===comment.text)return json({ok:true,memories});
-   item.audit.push({action:"edit",commentId:comment.id,actorId:me.id,actor:me.name,actorId:me.id,previousText:comment.text,newText:value,at:new Date().toISOString()});
+   item.audit.push({action:"edit",commentId:comment.id,actorId:me.id,actor:me.name,previousText:comment.text,newText:value,at:new Date().toISOString()});
    comment.text=value;comment.editedAt=new Date().toISOString();
   }else if(action==="react"){
    const emoji=String(b.emoji||"");
@@ -552,7 +552,7 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
    if(index<0)return json({error:"댓글 없음"},404);
    if(!me.is_admin&&item.comments[index].authorId!==me.id)return json({error:"권한 없음"},403);
    const removed=item.comments[index];
-   item.audit.push({action:"delete",commentId:removed.id,actorId:me.id,actor:me.name,actorId:me.id,previousText:removed.text,at:new Date().toISOString()});
+   item.audit.push({action:"delete",commentId:removed.id,actorId:me.id,actor:me.name,previousText:removed.text,at:new Date().toISOString()});
    item.comments.splice(index,1);
    for(const reply of item.comments)if(reply.parentId===removed.id)reply.parentId=null;
   }
