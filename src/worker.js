@@ -606,10 +606,15 @@ if(b.key==="allowance_audit"){
  for(const entry of b.value){if(!entry||typeof entry!=='object')return json({error:"감사기록 항목 오류"},400);const previous=entry.id!=null?existing.get(String(entry.id)):null;if(previous&&JSON.stringify(previous)!==JSON.stringify(entry))return json({error:"기존 감사기록은 변경할 수 없습니다."},409)}
  const members=(await env.DB.prepare("SELECT id,name FROM members WHERE family_id=?").bind(me.family_id).all()).results||[];
  const byName=new Map(members.map(x=>[x.name,x.id]));
+ const byId=new Map(members.map(x=>[String(x.id),x.name]));
+ for(const x of b.value){if(x.id!=null&&existing.has(String(x.id)))continue;
+  const name=x.childNameAtTime||x.child||null;
+  if(x.childId!=null&&(!byId.has(String(x.childId))||byId.get(String(x.childId))!==name))return json({error:"감사기록의 회원 ID와 이름이 일치하지 않습니다."},409);
+ }
  b.value=b.value.map(x=>{if(x.id!=null&&existing.has(String(x.id)))return x;
  const name=x.childNameAtTime||x.child||null;
  const resolved=byName.get(name)||null;
- return {...x,childId:x.childId||resolved,childNameAtTime:x.childNameAtTime||name,actorId:me.id,actorNameAtTime:x.actorNameAtTime||me.name,identityResolution:x.childId||resolved?'recorded':'unresolved'};
+ return {...x,childId:x.childId||resolved,childNameAtTime:name,actorId:me.id,actorNameAtTime:me.name,identityResolution:x.childId||resolved?'recorded':'unresolved'};
  });
 }
 if(b.key==="chores"&&!me.is_admin){const old=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='chores'").bind(me.family_id).first();let before={},next={};try{before=JSON.parse(old?.value_json||"{}");next=b.value||{}}catch{return json({error:"할 일 데이터 오류"},400)}for(const [name,rows] of Object.entries(next)){if(name!==me.name&&JSON.stringify(rows)!==JSON.stringify(before[name]))return json({error:"다른 가족 할 일 수정 불가"},403);if(name===me.name){const prior=before[name]||[];if(!Array.isArray(rows)||rows.length!==prior.length)return json({error:"할 일 설정은 관리자 전용"},403);if(prior.some(x=>!rows.some(y=>y.id===x.id)))return json({error:"설정 변경 불가"},403);for(const item of rows){const oldItem=prior.find(x=>x.id===item.id);if(!oldItem)return json({error:"할 일 설정은 관리자 전용"},403);for(const [date,record] of Object.entries(item.dayRecords||{})){const previous=oldItem.dayRecords?.[date];if(previous&&JSON.stringify(previous)!==JSON.stringify(record))return json({error:"제출한 할 일 기록은 변경할 수 없습니다."},403);if(!previous&&(!["done","exempt_requested"].includes(record.state)||record.submittedBy!==me.name))return json({error:"본인 완료 또는 면제 요청만 가능"},403)}const stripped={...item};delete stripped.dayRecords;const original={...oldItem};delete original.dayRecords;if(JSON.stringify(stripped)!==JSON.stringify(original))return json({error:"할 일 설정은 관리자 전용"},403)}}}}
