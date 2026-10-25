@@ -103,6 +103,33 @@ if(url.pathname==="/api/account"&&req.method==="PUT"){const b=await body(req);co
 if(url.pathname==="/api/members/account"&&req.method==="PUT"){if(!me.is_admin)return json({error:"관리자만 가족 계정을 변경할 수 있습니다."},403);const b=await body(req);if(!b.memberId)return json({error:"구성원을 선택해주세요."},400);const target=await env.DB.prepare("SELECT id FROM members WHERE id=? AND family_id=?").bind(b.memberId,me.family_id).first();if(!target)return json({error:"가족 구성원을 찾을 수 없습니다."},404);if(b.name!==undefined){const name=String(b.name||"").trim();if(!name)return json({error:"이름을 입력해주세요."},400);try{await renameMemberSafely(env,me.family_id,target.id,name)}catch(e){return json({error:e.message||"이름 변경에 실패했습니다."},409)}}if(b.emoji!==undefined){const emoji=String(b.emoji||"").trim();if(!emoji)return json({error:"아이콘을 입력해주세요."},400);await env.DB.prepare("UPDATE members SET emoji=? WHERE id=?").bind(emoji,target.id).run()}if(b.password!==undefined){if(String(b.password).length<4)return json({error:"새 비밀번호는 4자 이상이어야 합니다."},400);const salt=id(),hash=await passwordHash(String(b.password),salt);await env.DB.prepare("UPDATE members SET password_hash=?,password_salt=? WHERE id=?").bind(hash,salt,target.id).run();await env.DB.prepare("DELETE FROM sessions WHERE member_id=?").bind(target.id).run()}return json({ok:true})}
 if(url.pathname==="/api/password-requests"&&req.method==="GET"){if(!me.is_admin)return json({error:"관리자만 승인 요청을 확인할 수 있습니다."},403);const rows=await env.DB.prepare(`SELECT r.id,r.member_id,m.name,m.emoji,r.created_at FROM password_change_requests r JOIN members m ON m.id=r.member_id WHERE r.family_id=? AND r.status='pending' ORDER BY r.created_at`).bind(me.family_id).all();return json({requests:rows.results||[]})}
 if(url.pathname==="/api/password-requests/review"&&req.method==="POST"){if(!me.is_admin)return json({error:"관리자만 승인할 수 있습니다."},403);const b=await body(req);if(!b.requestId||!["approve","reject"].includes(b.action))return json({error:"승인 요청과 처리 방법을 확인해주세요."},400);const r=await env.DB.prepare("SELECT * FROM password_change_requests WHERE id=? AND family_id=? AND status='pending'").bind(b.requestId,me.family_id).first();if(!r)return json({error:"처리할 승인 요청이 없습니다."},404);if(b.action==="approve"){await env.DB.batch([env.DB.prepare("UPDATE members SET password_hash=?,password_salt=? WHERE id=?").bind(r.password_hash,r.password_salt,r.member_id),env.DB.prepare("DELETE FROM sessions WHERE member_id=?").bind(r.member_id),env.DB.prepare("UPDATE password_change_requests SET status='approved',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").bind(me.id,r.id)])}else await env.DB.prepare("UPDATE password_change_requests SET status='rejected',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").bind(me.id,r.id).run();return json({ok:true,approved:b.action==="approve"})}
+if(url.pathname==="/api/audit/identity"&&req.method==="GET"){
+ if(!me.is_admin)return json({error:"관리자만 전체 감사기록을 조회할 수 있습니다."},403);
+ const members=(await env.DB.prepare("SELECT id,name FROM members WHERE family_id=?").bind(me.family_id).all()).results||[];
+ const byName=new Map(members.map(m=>[m.name,m.id]));
+ const keys=['allowance_audit','allowance_ledger','household_ledger','chore_daily_requests','chores'];
+ const rows=(await env.DB.prepare("SELECT state_key,value_json FROM family_state WHERE family_id=? AND state_key IN ('allowance_audit','allowance_ledger','household_ledger','chore_daily_requests','chores')").bind(me.family_id).all()).results||[];
+ const records=[],counts={};
+ const resolve=(v)=>{if(typeof v!=='string'||!v)return null;return byName.get(v)||null};
+ const collect=(module,record,subjectName,actorName)=>{
+  if(!record||typeof record!=='object')return;
+  const subjectId=record.childId||record.memberId||record.allowanceMemberId||record.subjectId||null;
+  const actorId=record.actorId||record.approvedById||record.updatedById||null;
+  const id=subjectId||resolve(subjectName),actor=actorId||resolve(actorName);
+  const status=subjectId?'recorded':id?'current_name_match':'unresolved';
+  records.push({module,recordId:record.id||record.transactionId||record.recurringId||null,memberId:id,memberNameAtTime:record.childNameAtTime||subjectName||null,actorId:actor,actorNameAtTime:actorName||null,identityResolution:status,action:record.action||record.type||record.state||null,date:record.at||record.createdAt||record.date||null});
+  counts[status]=(counts[status]||0)+1;
+ };
+ for(const row of rows){
+  let value;try{value=JSON.parse(row.value_json)}catch{continue}
+  if(row.state_key==='allowance_audit'&&Array.isArray(value))for(const a of value)collect(row.state_key,a,a.child,a.actor);
+  else if(row.state_key==='allowance_ledger'&&value&&typeof value==='object')for(const [name,items] of Object.entries(value))if(Array.isArray(items))for(const item of items)collect(row.state_key,item,name,item.approvedBy||item.requestedBy);
+  else if(row.state_key==='household_ledger'&&Array.isArray(value))for(const item of value)collect(row.state_key,item,item.allowanceMemberName,item.createdBy);
+  else if(row.state_key==='chore_daily_requests'&&value&&typeof value==='object')for(const item of Object.values(value))collect(row.state_key,item,item.name,item.reviewedBy||item.requestedBy);
+  else if(row.state_key==='chores'&&value&&typeof value==='object')for(const [name,items] of Object.entries(value))if(Array.isArray(items))for(const item of items)collect(row.state_key,item,name,item.updatedBy);
+ }
+ return json({records,counts,readOnly:true,warning:"과거 이름 일치는 추정이며 영구 ID를 소급 확정하지 않습니다. 원본 거래와 잔액은 변경하지 않았습니다."});
+}
 if(url.pathname==="/api/allowance-audit/identity"&&req.method==="GET"){
  if(!me.is_admin)return json({error:"관리자만 감사기록을 조회할 수 있습니다."},403);
  const members=(await env.DB.prepare("SELECT id,name FROM members WHERE family_id=?").bind(me.family_id).all()).results||[];
