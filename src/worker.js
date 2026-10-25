@@ -114,7 +114,7 @@ if(url.pathname==="/api/recurring-audit"&&req.method==="GET"){
  const ledger=map.allowance_ledger||{},household=map.household_ledger||[];
  const items=configs.map(c=>{
   const expense=household.filter(x=>x.recurringId===c.id&&(x.period||String(x.date||'').slice(0,7))===period);
-  const credits=[];for(const [name,entries] of Object.entries(ledger)){if(!Array.isArray(entries))continue;for(const tx of entries)if(tx.recurringId===c.id&&(tx.period||String(tx.date||'').slice(0,7))===period)credits.push({recipient:name,transactionId:tx.id,amount:tx.amount,wallet:tx.wallet,status:tx.status,date:tx.date})}
+  const credits=[];for(const [name,entries] of Object.entries(ledger)){if(!Array.isArray(entries))continue;for(const tx of entries)if(tx.recurringId===c.id&&(tx.period||String(tx.date||'').slice(0,7))===period)credits.push({recipient:name,transactionId:tx.id,memberId:tx.memberId||null,memberNameAtTime:tx.memberNameAtTime||null,amount:tx.amount,wallet:tx.wallet,status:tx.status,date:tx.date})}
   const current=members.find(m=>m.name===c.allowance_member_name);
   return {recurringId:c.id,title:c.title,kind:c.kind,amount:c.amount,configuredRecipient:c.allowance_member_name,memberId:current?.id||null,recipientMatched:!!current,expenseRecorded:expense.length>0,expenseCount:expense.length,credits,needsReview:c.kind==='allowance'&&(!current||credits.length!==1||credits[0].recipient!==c.allowance_member_name||Number(credits[0].amount)!==Number(c.amount))};
  });
