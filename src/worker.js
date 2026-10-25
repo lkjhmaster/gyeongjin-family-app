@@ -249,11 +249,11 @@ if(url.pathname==="/api/allowance/minus-transfer/review"&&req.method==="POST"){
    const approved=rows.filter(x=>x.status==="approved"||(!x.status&&["income","expense"].includes(x.type)));
    const used=approved.filter(x=>x.wallet==="minus").reduce((n,x)=>n+(x.type==="expense"?Number(x.amount||0):x.type==="income"?-Number(x.amount||0):0),0);
    if(amount>Math.max(0,limit-Math.max(0,used)))return json({error:"마이너스 가용 한도가 부족합니다."},409);
-   const stamp=new Date().toISOString(),settlementId=id(),base={date:tx.date,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,transferRequestId:tx.id};
+   const stamp=new Date().toISOString(),settlementId=id(),base={date:tx.date,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,approvedAt:stamp,createdAt:stamp,settlementId,transferRequestId:tx.id};
    rows.push({...base,id:settlementId+":debit",type:"expense",wallet:"minus",amount,debtOrigin:destination,title:"마이너스 이동 출금"});
    rows.push({...base,id:settlementId+":credit",type:"income",wallet:destination,amount:net,title:"마이너스 이동 입금"});
-   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;tx.settlementId=settlementId;
-  }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedAt=new Date().toISOString()}
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedById=me.id;tx.approvedAt=stamp;tx.settlementId=settlementId;
+  }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedById=me.id;tx.rejectedAt=new Date().toISOString()}
   ledger[b.child]=rows;
   const updated=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
   if(updated.meta?.changes===1)return json({ok:true,ledger});
@@ -284,10 +284,10 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
    if(balance<amount)return json({error:"출금 지갑 잔고가 부족합니다."},409);
    if(repayment<=0||repayment>remaining)return json({error:"선택한 채무의 남은 사용액을 초과합니다."},409);
    const stamp=new Date().toISOString(),settlementId=id();
-   rows.push({id:settlementId+":debit",date:tx.date,type:"expense",wallet,amount,title:"마이너스 변제 · "+(tx.title||""),status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
-   rows.push({id:settlementId+":credit",date:tx.date,type:"income",wallet:"minus",amount:repayment,title:"마이너스 변제 상환",status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id,repaymentDebtId:debtId,debtOrigin:origin});
-   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;tx.settlementId=settlementId;tx.fee=fee;tx.repaymentAmount=repayment;tx.repaymentDebtId=debtId;
-  }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedAt=new Date().toISOString()}
+   rows.push({id:settlementId+":debit",date:tx.date,type:"expense",wallet,amount,title:"마이너스 변제 · "+(tx.title||""),status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
+   rows.push({id:settlementId+":credit",date:tx.date,type:"income",wallet:"minus",amount:repayment,title:"마이너스 변제 상환",status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id,repaymentDebtId:debtId,debtOrigin:origin});
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedById=me.id;tx.approvedAt=stamp;tx.settlementId=settlementId;tx.fee=fee;tx.repaymentAmount=repayment;tx.repaymentDebtId=debtId;
+  }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedById=me.id;tx.rejectedAt=new Date().toISOString()}
   ledger[b.child]=rows;
   const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
   if(update.meta?.changes===1)return json({ok:true,ledger});
@@ -304,7 +304,7 @@ if(url.pathname==="/api/allowance/split/request"&&req.method==="POST"){
  if(!me.is_admin&&me.name!==b.child)return json({error:"본인의 결제만 요청할 수 있습니다"},403);
  const requestId=typeof b.requestId==="string"&&/^split_[a-zA-Z0-9_-]{8,90}$/.test(b.requestId)?b.requestId:null;
  if(!requestId)return json({error:"요청 식별자가 올바르지 않습니다"},400);
- const stamp=new Date().toISOString(),tx={id:requestId,date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?b.debtOrigin:"",title:b.title.trim(),status:"pending",requestedBy:me.name,createdAt:stamp};
+ const stamp=new Date().toISOString(),tx={id:requestId,date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?b.debtOrigin:"",title:b.title.trim(),status:"pending",requestedBy:me.name,requestedById:me.id,createdAt:stamp};
  for(let attempt=0;attempt<5;attempt++){
   const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
   if(!state)return json({error:"용돈 원장을 찾을 수 없습니다"},404);
@@ -340,9 +340,9 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
    const rawLimit=limits[b.child];const minusLimit=Number(rawLimit||0);if(!Number.isSafeInteger(minusLimit)||minusLimit<0)return json({error:"마이너스 한도 설정 오류"},409);
    const minusAvailable=Math.max(0,minusLimit+balance("minus"));
    if(a.free>balance("free")||a.card>balance("card")||a.minus>minusAvailable)return json({error:"결제수단 잔액이 부족합니다."},409);
-   for(const wallet of wallets)if(a[wallet]>0)rows.push({id:tx.id+"_"+wallet,splitPaymentId:tx.id,date:tx.date,type:"expense",wallet,amount:a[wallet],debtOrigin:wallet==="minus"?tx.debtOrigin:"",title:tx.title,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,createdAt:stamp,approvedAt:stamp});
-   tx.status="approved";tx.approvedBy=me.name;tx.approvedAt=stamp;
-  }else if(b.action==="reject"){tx.status="rejected";tx.reviewedBy=me.name;tx.reviewedAt=stamp}
+   for(const wallet of wallets)if(a[wallet]>0)rows.push({id:tx.id+"_"+wallet,splitPaymentId:tx.id,date:tx.date,type:"expense",wallet,amount:a[wallet],debtOrigin:wallet==="minus"?tx.debtOrigin:"",title:tx.title,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,createdAt:stamp,approvedAt:stamp});
+   tx.status="approved";tx.approvedBy=me.name;tx.approvedById=me.id;tx.approvedAt=stamp;
+  }else if(b.action==="reject"){tx.status="rejected";tx.reviewedBy=me.name;tx.reviewedById=me.id;tx.reviewedAt=stamp}
   else{
    const parts=rows.filter(x=>x.splitPaymentId===tx.id&&x.status==="approved");
    if(parts.length!==wallets.filter(k=>a[k]>0).length||parts.some(x=>!wallets.includes(x.wallet)||a[x.wallet]!==x.amount)||new Set(parts.map(x=>x.wallet)).size!==parts.length)return json({error:"연결 거래 검증 실패"},409);
@@ -367,7 +367,7 @@ if(url.pathname==="/api/chores/late-completion"&&req.method==="POST"){
  const weekday=new Date(b.date+"T12:00:00Z").getUTCDay();if(item.repeat==="weekday"&&(weekday===0||weekday===6)||item.repeat==="weekend"&&weekday!==0&&weekday!==6||item.repeat==="days"&&(!Array.isArray(item.days)||!item.days.includes(weekday)))return json({error:"해당 날짜에 배정되지 않은 할 일입니다."},409);
  if(item.memoEnabled&&!memo)return json({error:"완료 메모가 필수입니다."},400);
  const prev=item.dayRecords?.[b.date];if(prev&&["done","exempt_requested","exempt_approved"].includes(prev.state))return json({error:"이미 처리된 할 일입니다."},409);
- const at=new Date().toISOString();item.dayRecords={...(item.dayRecords||{}),[b.date]:{state:"done",memo,lateApproved:true,lateReason:reason,reviewedBy:me.name,reviewedAt:at,submittedBy:me.name,submittedAt:at,previousState:prev?.state||"not_done"}};
+ const at=new Date().toISOString();item.dayRecords={...(item.dayRecords||{}),[b.date]:{state:"done",memo,lateApproved:true,lateReason:reason,reviewedBy:me.name,reviewedById:me.id,reviewedAt:at,submittedBy:me.name,submittedAt:at,previousState:prev?.state||"not_done"}};
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,note:"완료 인정 기록만 저장되었습니다. 보상금은 자동 지급되지 않습니다."});
 }
@@ -387,9 +387,9 @@ if(url.pathname==="/api/chores/history/correct"&&req.method==="POST"){
  const rows=ledger[b.name]||[],paymentKey="daily_chore|"+key;
  if(rows.some(x=>x.id===paymentKey||x.di?.dailyKey===paymentKey||x.status==="approved"&&x.type==="income"&&x.wallet==="free"&&x.date===date&&/할.?일|보상|수동/.test(String(x.title||""))))return json({error:"지급 내역이 있어 정정을 차단했습니다."},409);
  const at=new Date().toISOString();
- item.dayRecords[date]={...previous,state:"exempt_approved",lateExempt:true,reason,reviewedBy:me.name,reviewedAt:at,correction:{from:"done",to:"exempt_approved",reason,actor:me.name,at}};
+ item.dayRecords[date]={...previous,state:"exempt_approved",lateExempt:true,reason,reviewedBy:me.name,reviewedById:me.id,reviewedAt:at,correction:{from:"done",to:"exempt_approved",reason,actor:me.name,actorId:me.id,at}};
  const reqRow=requests[key];
- if(reqRow){const target=reqRow.items?.find(x=>x.id===b.id);if(target){target.state="exempt_approved";target.reward=0;target.reason=reason}reqRow.amount=(reqRow.items||[]).reduce((n,x)=>n+Number(x.reward||0),0);reqRow.corrections=[...(reqRow.corrections||[]),{id:b.id,from:"done",to:"exempt_approved",reason,actor:me.name,at}]}
+ if(reqRow){const target=reqRow.items?.find(x=>x.id===b.id);if(target){target.state="exempt_approved";target.reward=0;target.reason=reason}reqRow.amount=(reqRow.items||[]).reduce((n,x)=>n+Number(x.reward||0),0);reqRow.corrections=[...(reqRow.corrections||[]),{id:b.id,from:"done",to:"exempt_approved",reason,actor:me.name,actorId:me.id,at}]}
  const nextChores=JSON.stringify(chores),nextRequests=JSON.stringify(requests);
  const ops=[env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chores' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?) AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?)").bind(nextChores,me.family_id,saved[0].value_json,me.family_id,saved[1].value_json,me.family_id,saved[2].value_json)];
  if(reqRow)ops.push(env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chores' AND value_json=?)").bind(nextRequests,me.family_id,saved[1].value_json,me.family_id,nextChores));
@@ -414,7 +414,7 @@ if(url.pathname==="/api/chores/late-exemption"&&req.method==="POST"){
   const previous=item.dayRecords?.[b.date];
   if(previous&&["done","exempt_requested","exempt_approved"].includes(previous.state))return json({error:"이미 처리된 할 일입니다."},409);
   const at=new Date().toISOString();
-  item.dayRecords={...(item.dayRecords||{}),[b.date]:{state:"exempt_approved",lateApproved:true,lateExempt:true,lateReason:reason,reason,reviewedBy:me.name,reviewedAt:at,previousState:previous?.state||"not_done"}};
+  item.dayRecords={...(item.dayRecords||{}),[b.date]:{state:"exempt_approved",lateApproved:true,lateExempt:true,lateReason:reason,reason,reviewedBy:me.name,reviewedById:me.id,reviewedAt:at,previousState:previous?.state||"not_done"}};
   const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,row.value_json).run();
   if(result.meta?.changes===1)return json({ok:true,note:"미수행 인정: 달성률 포함, 보상금 지급 없음"});
  }
@@ -426,7 +426,7 @@ if(url.pathname==="/api/chores/exemption/review"&&req.method==="POST"){
  const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='chores'").bind(me.family_id).first();if(!state)return json({error:"할 일 데이터 없음"},409);
  const chores=JSON.parse(state.value_json),rows=chores[b.name];if(!Array.isArray(rows))return json({error:"할 일 없음"},404);
  const item=rows.find(x=>x.id===b.id);if(!item||item.dayRecords?.[b.date]?.state!=="exempt_requested")return json({error:"면제 요청 없음"},409);const member=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=? AND is_admin=0").bind(me.family_id,b.name).first();if(!member)return json({error:"자녀 계정이 아닙니다."},403);
- item.dayRecords[b.date]={...item.dayRecords[b.date],state:b.decision==="approve"?"exempt_approved":"exempt_rejected",reviewedBy:me.name,reviewedAt:new Date().toISOString()};
+ item.dayRecords[b.date]={...item.dayRecords[b.date],state:b.decision==="approve"?"exempt_approved":"exempt_rejected",reviewedBy:me.name,reviewedById:me.id,reviewedAt:new Date().toISOString()};
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,state:item.dayRecords[b.date].state});
 }
@@ -439,7 +439,7 @@ if(url.pathname==="/api/chores/legacy/reverse"&&req.method==="POST"){
  const original=rows.find(x=>x.id===b.id);if(!original||original.status!=="approved"||original.type!=="income"||original.wallet!=="free"||original.di?.action==="daily_chore_reward"||original.di?.action==="daily_chore_reward_reversal"||!/(할\s*일|chore)/i.test(String(original.title||"")+" "+String(original.di?.action||"")))return json({error:"과거 할 일 보상으로 확인되지 않은 거래입니다."},409);
  const amount=Number(original.amount);if(!Number.isSafeInteger(amount)||amount<=0)return json({error:"지급 금액 오류"},409);
  const reversalId="legacy_chore_reversal|"+b.id;if(rows.some(x=>x.id===reversalId||x.di?.reverses===b.id))return json({error:"이미 취소한 보상입니다."},409);
- const at=new Date().toISOString();rows.push({id:reversalId,date:at.slice(0,10),type:"expense",wallet:"free",amount,title:String(original.date||"")+" 과거 할 일 오지급 정정",status:"approved",requestedBy:me.name,approvedBy:me.name,createdAt:at,di:{action:"legacy_chore_reward_reversal",reverses:b.id,reason,originalAmount:amount}});
+ const at=new Date().toISOString();rows.push({id:reversalId,date:at.slice(0,10),type:"expense",wallet:"free",amount,title:String(original.date||"")+" 과거 할 일 오지급 정정",status:"approved",requestedBy:me.name,requestedById:me.id,approvedBy:me.name,approvedById:me.id,createdAt:at,di:{action:"legacy_chore_reward_reversal",reverses:b.id,reason,originalAmount:amount}});
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,amount,reversalId});
 }
@@ -456,7 +456,7 @@ if(url.pathname==="/api/chores/daily/reverse"&&req.method==="POST"){
  if(!original||!Number.isSafeInteger(Number(original.amount))||Number(original.amount)<=0||Number(original.amount)!==Number(request.amount))return json({error:"원본 보상금 검증 실패"},409);
  const reversalKey="daily_chore_reversal|"+key;
  if(rows.some(x=>x.id===reversalKey||x.di?.reverses===paymentKey))return json({error:"이미 승인 취소 처리됨"},409);
- const at=new Date().toISOString();rows.push({id:reversalKey,date:at.slice(0,10),type:"expense",wallet:"free",amount:Number(original.amount),title:b.date+" 할 일 보상 승인 취소",status:"approved",requestedBy:me.name,approvedBy:me.name,createdAt:at,di:{action:"daily_chore_reward_reversal",reverses:paymentKey,dailyKey:reversalKey,reason}});
+ const at=new Date().toISOString();rows.push({id:reversalKey,date:at.slice(0,10),type:"expense",wallet:"free",amount:Number(original.amount),title:b.date+" 할 일 보상 승인 취소",status:"approved",requestedBy:me.name,requestedById:me.id,approvedBy:me.name,approvedById:me.id,createdAt:at,di:{action:"daily_chore_reward_reversal",reverses:paymentKey,dailyKey:reversalKey,reason}});
  requests[key]={...request,status:"reversed",reversedBy:me.name,reversedAt:at,reversalReason:reason,reversalId:reversalKey};
  const ops=[env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?").bind(JSON.stringify(requests),me.id,me.family_id,saved[0].value_json),env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END"),env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,saved[1].value_json),env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END")];
  try{await env.DB.batch(ops)}catch{return json({error:"동시 수정 충돌: 변경 없이 종료했습니다."},409)}
@@ -482,7 +482,7 @@ if(url.pathname==="/api/chores/daily/prepare-past"&&req.method==="POST"){
  const amount=items.reduce((n,x)=>n+(x.dayRecords?.[date]?.state==="exempt_approved"?0:(Number.isSafeInteger(Number(x.reward))&&Number(x.reward)>0?Number(x.reward):100)),0);
  if(!Number.isSafeInteger(amount)||amount<=0)return json({error:"지급할 보상금이 없습니다."},409);
  const at=new Date().toISOString();
- requests[key]={name,date,status:"pending",amount,items:items.map(x=>({id:x.id,title:x.title,reward:x.dayRecords?.[date]?.state==="exempt_approved"?0:(Number(x.reward)>0?Number(x.reward):100),state:x.dayRecords?.[date]?.state})),requestedAt:at,requestedBy:me.name,source:"past_admin_review",note:"부모가 과거 할 일을 인정한 후 보상 승인 요청을 별도 생성함"};
+ requests[key]={name,date,status:"pending",amount,items:items.map(x=>({id:x.id,title:x.title,reward:x.dayRecords?.[date]?.state==="exempt_approved"?0:(Number(x.reward)>0?Number(x.reward):100),state:x.dayRecords?.[date]?.state})),requestedAt:at,requestedBy:me.name,requestedById:me.id,source:"past_admin_review",note:"부모가 과거 할 일을 인정한 후 보상 승인 요청을 별도 생성함"};
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chores' AND value_json=?) AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?)").bind(JSON.stringify(requests),me.id,me.family_id,saved[0].value_json,me.family_id,saved[1].value_json,me.family_id,saved[2].value_json).run();
  if(result.meta?.changes!==1)return json({error:"동시 변경이 감지되었습니다. 다시 확인해주세요."},409);
  return json({ok:true,status:"pending",amount,note:"승인 요청만 생성했습니다. 용돈은 지급되지 않았습니다."});
@@ -506,8 +506,8 @@ if(url.pathname==="/api/chores/daily/review"&&req.method==="POST"){
  const paymentKey="daily_chore|"+key,rows=ledger[b.name]||[];
  if(rows.some(x=>x.di?.dailyKey===paymentKey))return json({error:"이미 지급됨"},409);
  if(b.decision==="approve"&&rows.some(x=>x.status==="approved"&&x.type==="income"&&x.wallet==="free"&&x.date===date&&/할.?일|보상|수동/.test(String(x.title||""))))return json({error:"같은 날짜의 수동 보상 지급 후보가 있습니다. 중복 지급 방지를 위해 승인을 차단했습니다."},409);
- if(b.decision==="approve"&&payout>0){rows.push({id:paymentKey,date,type:"income",wallet:"free",amount:payout,title:date+" 하루 할 일 전체 달성 보상",status:"approved",approvedBy:me.name,di:{action:"daily_chore_reward",dailyKey:paymentKey,originalAmount:amount,adjustReason:payout!==amount?reason:null}});ledger[b.name]=rows}
- requests[key]={...request,status:b.decision==="approve"?"approved":"rejected",reviewedBy:me.name,reviewedAt:new Date().toISOString(),originalAmount:amount,amount:b.decision==="approve"?payout:request.amount,adjustment:payout!==amount&&b.decision==="approve"?{from:amount,to:payout,reason,actor:me.name,at:new Date().toISOString()}:null};
+ if(b.decision==="approve"&&payout>0){rows.push({id:paymentKey,date,type:"income",wallet:"free",amount:payout,title:date+" 하루 할 일 전체 달성 보상",status:"approved",approvedBy:me.name,approvedById:me.id,di:{action:"daily_chore_reward",dailyKey:paymentKey,originalAmount:amount,adjustReason:payout!==amount?reason:null}});ledger[b.name]=rows}
+ requests[key]={...request,status:b.decision==="approve"?"approved":"rejected",reviewedBy:me.name,reviewedById:me.id,reviewedAt:new Date().toISOString(),originalAmount:amount,amount:b.decision==="approve"?payout:request.amount,adjustment:payout!==amount&&b.decision==="approve"?{from:amount,to:payout,reason,actor:me.name,actorId:me.id,at:new Date().toISOString()}:null};
  const nextRequests=JSON.stringify(requests),ops=[env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?) AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chores' AND value_json=?)").bind(nextRequests,me.family_id,saved[0].value_json,me.family_id,saved[2].value_json,me.family_id,saved[1].value_json)];
  if(b.decision==="approve"&&payout>0)ops.push(env.DB.prepare("UPDATE family_state SET value_json=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=? AND EXISTS(SELECT 1 FROM family_state WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?)").bind(JSON.stringify(ledger),me.family_id,saved[2].value_json,me.family_id,nextRequests));
  const guarded=ops.flatMap(op=>[op,env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END")]);try{await env.DB.batch(guarded)}catch{return json({error:"동시 변경 충돌: 지급 없이 종료했습니다."},409)}
@@ -541,7 +541,7 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
    const value=String(b.text||"").trim();
    if(!value||value.length>500)return json({error:"댓글은 1~500자입니다."},400);
    if(value===comment.text)return json({ok:true,memories});
-   item.audit.push({action:"edit",commentId:comment.id,actorId:me.id,actor:me.name,previousText:comment.text,newText:value,at:new Date().toISOString()});
+   item.audit.push({action:"edit",commentId:comment.id,actorId:me.id,actor:me.name,actorId:me.id,previousText:comment.text,newText:value,at:new Date().toISOString()});
    comment.text=value;comment.editedAt=new Date().toISOString();
   }else if(action==="react"){
    const emoji=String(b.emoji||"");
@@ -552,7 +552,7 @@ if(url.pathname==="/api/memories/interact"&&req.method==="POST"){
    if(index<0)return json({error:"댓글 없음"},404);
    if(!me.is_admin&&item.comments[index].authorId!==me.id)return json({error:"권한 없음"},403);
    const removed=item.comments[index];
-   item.audit.push({action:"delete",commentId:removed.id,actorId:me.id,actor:me.name,previousText:removed.text,at:new Date().toISOString()});
+   item.audit.push({action:"delete",commentId:removed.id,actorId:me.id,actor:me.name,actorId:me.id,previousText:removed.text,at:new Date().toISOString()});
    item.comments.splice(index,1);
    for(const reply of item.comments)if(reply.parentId===removed.id)reply.parentId=null;
   }
