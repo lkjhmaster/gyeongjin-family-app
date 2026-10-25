@@ -103,6 +103,21 @@ if(url.pathname==="/api/account"&&req.method==="PUT"){const b=await body(req);co
 if(url.pathname==="/api/members/account"&&req.method==="PUT"){if(!me.is_admin)return json({error:"관리자만 가족 계정을 변경할 수 있습니다."},403);const b=await body(req);if(!b.memberId)return json({error:"구성원을 선택해주세요."},400);const target=await env.DB.prepare("SELECT id FROM members WHERE id=? AND family_id=?").bind(b.memberId,me.family_id).first();if(!target)return json({error:"가족 구성원을 찾을 수 없습니다."},404);if(b.name!==undefined){const name=String(b.name||"").trim();if(!name)return json({error:"이름을 입력해주세요."},400);try{await renameMemberSafely(env,me.family_id,target.id,name)}catch(e){return json({error:e.message||"이름 변경에 실패했습니다."},409)}}if(b.emoji!==undefined){const emoji=String(b.emoji||"").trim();if(!emoji)return json({error:"아이콘을 입력해주세요."},400);await env.DB.prepare("UPDATE members SET emoji=? WHERE id=?").bind(emoji,target.id).run()}if(b.password!==undefined){if(String(b.password).length<4)return json({error:"새 비밀번호는 4자 이상이어야 합니다."},400);const salt=id(),hash=await passwordHash(String(b.password),salt);await env.DB.prepare("UPDATE members SET password_hash=?,password_salt=? WHERE id=?").bind(hash,salt,target.id).run();await env.DB.prepare("DELETE FROM sessions WHERE member_id=?").bind(target.id).run()}return json({ok:true})}
 if(url.pathname==="/api/password-requests"&&req.method==="GET"){if(!me.is_admin)return json({error:"관리자만 승인 요청을 확인할 수 있습니다."},403);const rows=await env.DB.prepare(`SELECT r.id,r.member_id,m.name,m.emoji,r.created_at FROM password_change_requests r JOIN members m ON m.id=r.member_id WHERE r.family_id=? AND r.status='pending' ORDER BY r.created_at`).bind(me.family_id).all();return json({requests:rows.results||[]})}
 if(url.pathname==="/api/password-requests/review"&&req.method==="POST"){if(!me.is_admin)return json({error:"관리자만 승인할 수 있습니다."},403);const b=await body(req);if(!b.requestId||!["approve","reject"].includes(b.action))return json({error:"승인 요청과 처리 방법을 확인해주세요."},400);const r=await env.DB.prepare("SELECT * FROM password_change_requests WHERE id=? AND family_id=? AND status='pending'").bind(b.requestId,me.family_id).first();if(!r)return json({error:"처리할 승인 요청이 없습니다."},404);if(b.action==="approve"){await env.DB.batch([env.DB.prepare("UPDATE members SET password_hash=?,password_salt=? WHERE id=?").bind(r.password_hash,r.password_salt,r.member_id),env.DB.prepare("DELETE FROM sessions WHERE member_id=?").bind(r.member_id),env.DB.prepare("UPDATE password_change_requests SET status='approved',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").bind(me.id,r.id)])}else await env.DB.prepare("UPDATE password_change_requests SET status='rejected',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?").bind(me.id,r.id).run();return json({ok:true,approved:b.action==="approve"})}
+if(url.pathname==="/api/allowance-audit/identity"&&req.method==="GET"){
+ if(!me.is_admin)return json({error:"관리자만 감사기록을 조회할 수 있습니다."},403);
+ const members=(await env.DB.prepare("SELECT id,name FROM members WHERE family_id=?").bind(me.family_id).all()).results||[];
+ const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_audit'").bind(me.family_id).first();
+ let audit=[];try{audit=JSON.parse(state?.value_json||"[]")}catch{return json({error:"감사기록 형식 오류"},409)}
+ if(!Array.isArray(audit))return json({error:"감사기록 형식 오류"},409);
+ const memberByName=new Map(members.map(m=>[m.name,m.id]));
+ const records=audit.map(a=>{
+  const childName=a.childNameAtTime||a.child||null,actorName=a.actor||null;
+  const memberId=a.childId||a.memberId||memberByName.get(childName)||null;
+  const actorId=a.actorId||memberByName.get(actorName)||null;
+  return {...a,memberId,actorId,identityResolution:a.childId||a.memberId?'recorded':memberId?'current_name_match':'unresolved'};
+ });
+ return json({records,readOnly:true,warning:"기존 이름 기반 기록은 현재 이름이 일치하는 경우에만 추정 연결됩니다. 과거 개명 기록은 자동 확정하지 않습니다."});
+}
 if(url.pathname==="/api/recurring-audit"&&req.method==="GET"){
  if(!me.is_admin)return json({error:"관리자만 확인할 수 있습니다."},403);
  const period=url.searchParams.get("period")||new Date(Date.now()+32400000).toISOString().slice(0,7);
