@@ -106,7 +106,7 @@ if(url.pathname==="/api/password-requests/review"&&req.method==="POST"){if(!me.i
 if(url.pathname==="/api/recurring-audit"&&req.method==="GET"){
  if(!me.is_admin)return json({error:"관리자만 확인할 수 있습니다."},403);
  const period=url.searchParams.get("period")||new Date(Date.now()+32400000).toISOString().slice(0,7);
- if(!/^\\d{4}-\\d{2}$/.test(period))return json({error:"조회 월을 확인해주세요."},400);
+ if(!/^\d{4}-\d{2}$/.test(period))return json({error:"조회 월을 확인해주세요."},400);
  const configs=(await env.DB.prepare("SELECT id,kind,title,amount,billing_day,allowance_member_name FROM recurring_expenses WHERE family_id=? ORDER BY created_at").bind(me.family_id).all()).results||[];
  const members=(await env.DB.prepare("SELECT id,name FROM members WHERE family_id=?").bind(me.family_id).all()).results||[];
  const rows=(await env.DB.prepare("SELECT state_key,value_json FROM family_state WHERE family_id=? AND state_key IN ('household_ledger','allowance_ledger')").bind(me.family_id).all()).results||[];
