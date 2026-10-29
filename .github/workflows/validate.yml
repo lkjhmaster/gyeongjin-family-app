@@ -40,7 +40,9 @@ jobs:
           node scripts/check-split-payment.mjs
           node scripts/test-split-payment.mjs
       - name: Verify repayment cancellation and UI integration
-        run: node --test scripts/test-repayment.mjs
+        run: |
+          node --test scripts/test-repayment.mjs
+          node --test scripts/test-aggregate-repayment.mjs
 
       - name: Build Cloudflare API bundle
         run: npx --yes wrangler@4 deploy --config wrangler.api.jsonc --dry-run
@@ -50,6 +52,7 @@ jobs:
           "$RUNNER_TEMP/family-browser/node_modules/.bin/playwright" install --with-deps chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-child-trade-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-choice-dialog.cjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-aggregate-repayment-browser.cjs
 
       - name: Publish validation commit status
         if: ${{ always() }}

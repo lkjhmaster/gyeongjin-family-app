@@ -9,6 +9,7 @@ async function check(){
   const data=await response.json();
   assert.equal(data.service,'gyeongjin-family-api');assert.equal(data.database,true);
   assert.ok(data.features.includes('minus-repayment-cancel'));
+  assert.ok(data.features.includes('minus-repayment-aggregate'));
   assert.ok(data.features.includes('split-payment'),'deployed API must support split payment');
   assert.equal(data.childTradeSchema,true,'production lifecycle schema must be ready');assert.ok(data.features.includes('child-trade-lifecycle-v2'));assert.ok(data.features.includes('child-trade-split-goods'));assert.ok(data.features.includes('child-trade-seller-receipt'));assert.ok(data.features.includes('child-trade-child-inbox'));assert.ok(data.features.includes('child-trade-loan-approval'),'deployed API must support child loan approval');
   if(process.env.EXPECTED_RELEASE)assert.equal(data.release,process.env.EXPECTED_RELEASE);

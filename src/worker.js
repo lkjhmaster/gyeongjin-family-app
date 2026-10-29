@@ -1,3 +1,4 @@
+import {planRepayment,validRepaymentSettlement} from './minus-repayment.js';
 import {processRecurringAtomic} from './recurring.js';
 import {childTradeLifecycle} from './child-transactions/lifecycle.js';
 const JSON_HEADERS={"content-type":"application/json; charset=utf-8"};
@@ -36,7 +37,7 @@ async function renameMemberSafely(env,familyId,memberId,newName){
 async function createSession(memberId,env){const token=crypto.randomUUID()+crypto.randomUUID();const tokenHash=await digest(token);await env.DB.prepare("INSERT INTO sessions(token_hash,member_id,expires_at) VALUES(?,?,datetime('now','+30 days'))").bind(tokenHash,memberId).run();return token}
 const handler={async scheduled(event,env,ctx){ctx.waitUntil(processRecurringAtomic(env))},async fetch(req,env){const url=new URL(req.url);
 if(req.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});if(url.pathname==="/api/health"){
- try{await env.DB.prepare("SELECT 1 FROM families LIMIT 1").first();const schema=await env.DB.prepare("SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name IN ('child_trade_actions','child_trade_delivery','child_trade_details','child_trade_guards','child_trade_funding')").first();return json({childTradeSchema:schema?.count===5,ok:true,service:"gyeongjin-family-api",database:true,release:env.RELEASE_SHA||"unknown",features:["minus-repayment-cancel","split-payment","child-trade-loan-approval","child-trade-lifecycle-v2","child-trade-split-goods","child-trade-seller-receipt","child-trade-child-inbox"]})}
+ try{await env.DB.prepare("SELECT 1 FROM families LIMIT 1").first();const schema=await env.DB.prepare("SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name IN ('child_trade_actions','child_trade_delivery','child_trade_details','child_trade_guards','child_trade_funding')").first();return json({childTradeSchema:schema?.count===5,ok:true,service:"gyeongjin-family-api",database:true,release:env.RELEASE_SHA||"unknown",features:["minus-repayment-aggregate","minus-repayment-cancel","split-payment","child-trade-loan-approval","child-trade-lifecycle-v2","child-trade-split-goods","child-trade-seller-receipt","child-trade-child-inbox"]})}
  catch{return json({ok:false,service:"gyeongjin-family-api",database:false},503)}
 }
 if(url.pathname==="/api/setup-status"&&req.method==="GET"){const row=await env.DB.prepare("SELECT COUNT(*) c FROM families").first();return json({initialized:Number(row?.c||0)>0})}
@@ -190,10 +191,10 @@ if(url.pathname==="/api/allowance/minus-repayment/cancel"&&req.method==="POST"){
   if(!["approved","pending"].includes(request.status))return json({error:"이미 취소 또는 처리된 변제입니다."},409);
   const linked=rows.filter(x=>x.repaymentRequestId===request.id);
   if(request.status==="pending"&&linked.length)return json({error:"승인 전 변제에 정산 거래가 연결되어 있어 취소할 수 없습니다."},409);
-  if(request.status==="approved"&&(!request.settlementId||linked.length!==2||linked.some(x=>x.settlementId!==request.settlementId||x.status!=="approved")||linked.filter(x=>x.type==="expense"&&x.wallet===request.wallet&&Number(x.amount)===Number(request.amount)).length!==1||linked.filter(x=>x.type==="income"&&x.wallet==="minus"&&x.repaymentDebtId===request.repaymentDebtId&&Number(x.amount)===Number(request.repaymentAmount)).length!==1))return json({error:"변제 연결 원장에 불일치가 있어 취소를 중단했습니다."},409);
+  if(request.status==="approved"&&!validRepaymentSettlement(request,linked))return json({error:"변제 연결 원장에 불일치가 있어 취소를 중단했습니다."},409);
   const settlementIds=new Set(linked.map(x=>x.id));
   if(settlementIds.size!==linked.length||rows.filter(x=>x.id===request.id).length!==1||rows.some(x=>x!==request&&!linked.includes(x)&&request.settlementId&&x.settlementId===request.settlementId))return json({error:"변제 연결 거래를 모두 확인하지 못했습니다."},409);
-  const stamp=new Date().toISOString();for(const x of [request,...linked]){x.status="cancelled";x.cancelledAt=stamp;x.cancelledBy=me.name;x.cancellationReason="관리자 변제 취소"}
+  const stamp=new Date().toISOString();for(const x of [request,...linked]){x.status="cancelled";x.cancelledAt=stamp;x.cancelledBy=me.name;x.cancelledById=me.id;x.cancellationReason="관리자 변제 취소"}
   const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();
   if(update.meta?.changes===1)return json({ok:true,ledger});
  }
@@ -260,6 +261,14 @@ if(url.pathname==="/api/allowance/minus-transfer/review"&&req.method==="POST"){
  }
  return json({error:"동시 변경 충돌. 다시 시도해주세요."},409);
 }
+if(url.pathname==="/api/allowance/minus-repayment/quote"&&req.method==="POST"){
+ const b=await body(req);if(typeof b.child!=="string"||(!me.is_admin&&me.name!==b.child))return json({error:"본인의 변제만 확인할 수 있습니다."},403);
+ const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
+ let ledger;try{ledger=JSON.parse(state?.value_json||"{}")}catch{return json({error:"원장 데이터 오류"},500)}
+ const rows=Array.isArray(ledger[b.child])?ledger[b.child]:[],tx=b.id?rows.find(x=>x.id===b.id&&x.type==='minus_repayment'&&x.status==='pending'):null;
+ if(b.id&&!tx)return json({error:"대기 중인 변제 요청을 찾을 수 없습니다."},409);
+ try{const plan=planRepayment(rows,tx?.wallet||b.wallet,tx?Number(tx.amount):b.amount);return json({ok:true,plan,quoteToken:await digest(JSON.stringify(plan))})}catch(e){return json({error:e.message},409)}
+}
 if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"부모 관리자만 처리할 수 있습니다."},403);
  const b=await body(req);if(typeof b.child!=="string"||typeof b.id!=="string"||!["approve","reject"].includes(b.action))return json({error:"요청 형식이 올바르지 않습니다."},400);
@@ -275,18 +284,13 @@ if(url.pathname==="/api/allowance/minus-repayment/review"&&req.method==="POST"){
   if(!Number.isSafeInteger(amount)||amount<=0||!["free","card"].includes(wallet))return json({error:"변제 금액 또는 출금 지갑이 올바르지 않습니다."},400);
   if(b.action==="approve"){
 
-   const approved=rows.filter(x=>x.status==="approved"),balance=approved.filter(x=>x.wallet===wallet).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
-   const debtEntries=approved.filter(x=>x.wallet==="minus"&&x.type==="expense"),repaid=new Map();
-   for(const x of approved.filter(x=>x.wallet==="minus"&&x.repaymentDebtId)){repaid.set(x.repaymentDebtId,(repaid.get(x.repaymentDebtId)||0)+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0))}
-   const debtId=tx.repaymentDebtId,debtEntry=debtEntries.find(x=>x.id===debtId),origin=debtEntry?.debtOrigin;
-   if(!debtEntry||!["free","card"].includes(origin))return json({error:"변제할 마이너스 사용 건의 출처가 미지정입니다. 부모가 출처를 확인해야 합니다."},409);
-   const remaining=Number(debtEntry.amount||0)-(repaid.get(debtId)||0),fee=wallet==="card"&&origin==="free"?Math.round(amount*.5):0,repayment=amount-fee;
-   if(balance<amount)return json({error:"출금 지갑 잔고가 부족합니다."},409);
-   if(repayment<=0||repayment>remaining)return json({error:"선택한 채무의 남은 사용액을 초과합니다."},409);
-   const stamp=new Date().toISOString(),settlementId=id();
-   rows.push({id:settlementId+":debit",date:tx.date,type:"expense",wallet,amount,title:"마이너스 변제 · "+(tx.title||""),status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id});
-   rows.push({id:settlementId+":credit",date:tx.date,type:"income",wallet:"minus",amount:repayment,title:"마이너스 변제 상환",status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id,repaymentDebtId:debtId,debtOrigin:origin});
-   tx.status="approved";tx.approvedBy=me.name;tx.approvedById=me.id;tx.approvedAt=stamp;tx.settlementId=settlementId;tx.fee=fee;tx.repaymentAmount=repayment;tx.repaymentDebtId=debtId;
+   let plan;try{plan=planRepayment(rows,wallet,amount)}catch(e){return json({error:e.message},409)}
+   const quoteToken=await digest(JSON.stringify(plan));
+   if((tx.repaymentMode==='aggregate-v1'||b.quoteToken)&&b.quoteToken!==quoteToken)return json({error:"잔액 또는 배분이 변경되었습니다. 최신 변제 내역을 다시 확인해주세요."},409);
+   const stamp=new Date().toISOString(),settlementId=id(),base={date:tx.date,status:'approved',requestedBy:tx.requestedBy,requestedById:tx.requestedById||null,approvedBy:me.name,approvedById:me.id,approvedAt:stamp,createdAt:stamp,settlementId,repaymentRequestId:tx.id};
+   rows.push({...base,id:settlementId+':debit',type:'expense',wallet,amount,title:'마이너스 통합 변제 · '+(tx.title||'')});
+   plan.allocations.forEach((part,i)=>rows.push({...base,id:settlementId+':credit:'+i,type:'income',wallet:'minus',amount:part.repayment,title:'마이너스 변제 · '+(part.origin==='free'?'자유성격':'카드성격')+' · '+part.title,repaymentDebtId:part.debtId,debtOrigin:part.origin,repaymentFee:part.fee}));
+   Object.assign(tx,{status:'approved',approvedBy:me.name,approvedById:me.id,approvedAt:stamp,settlementId,fee:plan.fee,repaymentAmount:plan.repayment,repaymentMode:'aggregate-v1',repaymentPlan:plan});
   }else{tx.status="rejected";tx.rejectedBy=me.name;tx.rejectedById=me.id;tx.rejectedAt=new Date().toISOString()}
   ledger[b.child]=rows;
   const update=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_ledger' AND value_json=?").bind(JSON.stringify(ledger),me.id,me.family_id,state.value_json).run();

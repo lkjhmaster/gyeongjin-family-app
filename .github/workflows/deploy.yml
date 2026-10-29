@@ -35,6 +35,7 @@ jobs:
           python3 scripts/test-child-trade-schema.py
           node scripts/check-production-allowance.mjs
           node --test scripts/test-repayment.mjs
+          node --test scripts/test-aggregate-repayment.mjs
           node scripts/check-split-payment.mjs
           node scripts/test-split-payment.mjs
       - name: Require Cloudflare deployment credentials
