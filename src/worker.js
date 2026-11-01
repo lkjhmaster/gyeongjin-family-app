@@ -338,11 +338,11 @@ if(url.pathname==="/api/allowance/split/review"&&req.method==="POST"){
   const stamp=new Date().toISOString();
   if(b.action==="approve"){
    const approved=rows.filter(x=>(x.status||"approved")==="approved");
-   const balance=w=>approved.filter(x=>x.wallet===w).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
+   const balance=w=>approved.filter(x=>(x.wallet||"free")===w).reduce((n,x)=>n+(x.type==="income"?Number(x.amount||0):x.type==="expense"?-Number(x.amount||0):0),0);
    const lim=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_limits'").bind(me.family_id).first();
    let limits={};try{limits=JSON.parse(lim?.value_json||"{}")||{}}catch{}
    const rawLimit=limits[b.child];const minusLimit=Number(rawLimit||0);if(!Number.isSafeInteger(minusLimit)||minusLimit<0)return json({error:"마이너스 한도 설정 오류"},409);
-   const minusAvailable=Math.max(0,minusLimit+balance("minus"));
+   const minusAvailable=Math.max(0,minusLimit-Math.max(0,-balance("minus")));
    if(a.free>balance("free")||a.card>balance("card")||a.minus>minusAvailable)return json({error:"결제수단 잔액이 부족합니다."},409);
    for(const wallet of wallets)if(a[wallet]>0)rows.push({id:tx.id+"_"+wallet,splitPaymentId:tx.id,date:tx.date,type:"expense",wallet,amount:a[wallet],debtOrigin:wallet==="minus"?tx.debtOrigin:"",title:tx.title,status:"approved",requestedBy:tx.requestedBy,approvedBy:me.name,approvedById:me.id,createdAt:stamp,approvedAt:stamp});
    tx.status="approved";tx.approvedBy=me.name;tx.approvedById=me.id;tx.approvedAt=stamp;
