@@ -375,18 +375,18 @@ async function splitPaymentForm(encoded){
  if(!allowanceAccessibleChildren().some(x=>x.name===name))return toast('권한이 없어요');
  const balances=splitPaymentBalances(name),date=localDateKey();
  const fields=[['free','자유용돈'],['card','카드용돈'],['minus','마이너스']].map(([key,label])=>'<div class="field"><label>'+label+' <small style="font-weight:400;color:var(--muted)">잔액 <span id="split_balance_'+key+'">'+balances[key].toLocaleString()+'</span>원</small></label><input id="split_'+key+'" type="number" min="0" step="1" inputmode="numeric" value="0" oninput="splitPaymentUpdate()"></div>').join('');
- shell('<div class="page" id="splitPaymentForm" data-child="'+esc(encoded)+'"><button class="ghost back" onclick="allowanceChild(\''+encoded+'\')">← 용돈기입장</button><h1 class="title">통합결제</h1><p class="sub">자동배분 없이 결제수단별 금액을 직접 입력해요.</p><div class="card"><div class="field"><label>구매 품목</label><input id="split_title" maxlength="40" placeholder="예: 인형"></div><div class="field"><label>구매 날짜</label><input id="split_date" type="date" value="'+date+'"></div><div class="field"><label>총 구매금액</label><input id="split_total" type="number" min="1" step="1" inputmode="numeric" oninput="splitPaymentUpdate()"></div>'+fields+'<div class="field"><label>마이너스 사용 출처 (마이너스 결제 시 필수)</label><select id="split_debt_origin" onchange="splitPaymentUpdate()"><option value="">선택하세요</option><option value="free">자유용돈</option><option value="card">카드용돈</option></select></div><div class="row"><b>배분 합계</b><b id="split_sum">0원</b></div><p id="split_validation" class="label" role="status">구매금액을 입력해 주세요.</p><button id="split_submit" class="primary full" disabled onclick="splitPaymentSubmit(\''+encoded+'\')">부모 승인 요청</button></div></div>');
+ shell('<div class="page" id="splitPaymentForm" data-child="'+esc(encoded)+'"><button class="ghost back" onclick="allowanceChild(\''+encoded+'\')">← 용돈기입장</button><h1 class="title">통합결제</h1><p class="sub">자동배분 없이 결제수단별 금액을 직접 입력해요.</p><div class="card"><div class="field"><label>구매 품목</label><input id="split_title" maxlength="40" placeholder="예: 인형"></div><div class="field"><label>구매 날짜</label><input id="split_date" type="date" value="'+date+'"></div><div class="field"><label>총 구매금액</label><input id="split_total" type="number" min="1" step="1" inputmode="numeric" oninput="splitPaymentUpdate()"></div>'+fields+'<div class="row"><b>배분 합계</b><b id="split_sum">0원</b></div><p id="split_validation" class="label" role="status">구매금액을 입력해 주세요.</p><button id="split_submit" class="primary full" disabled onclick="splitPaymentSubmit(\''+encoded+'\')">부모 승인 요청</button></div></div>');
 }
 function splitPaymentDraft(){
  const amount=Number(document.getElementById('split_total')?.value||0);
  const allocations={free:Number(document.getElementById('split_free')?.value||0),card:Number(document.getElementById('split_card')?.value||0),minus:Number(document.getElementById('split_minus')?.value||0)};
  const sum=Object.values(allocations).reduce((n,x)=>n+x,0);
- return {amount,allocations,sum,debtOrigin:document.getElementById('split_debt_origin')?.value||'',title:document.getElementById('split_title')?.value.trim()||'',date:document.getElementById('split_date')?.value||''};
+ return {amount,allocations,sum,title:document.getElementById('split_title')?.value.trim()||'',date:document.getElementById('split_date')?.value||''};
 }
 function splitPaymentUpdate(){
  const d=splitPaymentDraft(),name=decodeURIComponent(document.getElementById('splitPaymentForm')?.dataset.child||''),balances=splitPaymentBalances(name);
  for(const key of ['free','card','minus']){const el=document.getElementById('split_balance_'+key);if(el)el.textContent=balances[key].toLocaleString();}
- const valid=Number.isSafeInteger(d.amount)&&d.amount>0&&Object.values(d.allocations).every(Number.isSafeInteger)&&Object.values(d.allocations).every(n=>n>=0)&&d.sum===d.amount&&(d.allocations.minus===0||['free','card'].includes(d.debtOrigin))&&Object.entries(d.allocations).every(([key,n])=>n<=balances[key]);
+ const valid=Number.isSafeInteger(d.amount)&&d.amount>0&&Object.values(d.allocations).every(Number.isSafeInteger)&&Object.values(d.allocations).every(n=>n>=0)&&d.sum===d.amount&&Object.entries(d.allocations).every(([key,n])=>n<=balances[key]);
  document.getElementById('split_sum').textContent=d.sum.toLocaleString()+'원';
  document.getElementById('split_validation').textContent=!valid?'금액 합계와 각 용돈의 잔액을 확인해 주세요.':'배분금액이 일치합니다.';
  document.getElementById('split_submit').disabled=!valid;
@@ -398,7 +398,7 @@ async function splitPaymentSubmit(encoded){
  const btn=document.getElementById('split_submit');if(btn)btn.disabled=true;
  const requestId=btn?.dataset.requestId||('split_'+(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2)));if(btn)btn.dataset.requestId=requestId;
  try{
-  const r=await api('/api/allowance/split/request',{method:'POST',body:JSON.stringify({child:name,requestId,title:d.title,date:d.date,amount:d.amount,allocations:d.allocations,debtOrigin:d.debtOrigin})});
+  const r=await api('/api/allowance/split/request',{method:'POST',body:JSON.stringify({child:name,requestId,title:d.title,date:d.date,amount:d.amount,allocations:d.allocations})});
   if(r.ok!==true)throw Error('요청 저장 실패');
   localStorage.setItem('gyeongjin_allowance_ledger',JSON.stringify(r.ledger));
   allowanceLedgerExpectedJson=JSON.stringify(r.ledger);
