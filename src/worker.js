@@ -302,13 +302,13 @@ if(url.pathname==="/api/allowance/split/request"&&req.method==="POST"){
  const b=await body(req),a=b.allocations||{},wallets=["free","card","minus"],amount=b.amount;
  if(typeof b.child!=="string"||typeof b.title!=="string"||!b.title.trim()||b.title.length>40||typeof b.date!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isSafeInteger(amount)||amount<=0||wallets.some(k=>!Number.isSafeInteger(a[k])||a[k]<0)||wallets.reduce((n,k)=>n+a[k],0)!==amount)return json({error:"통합결제 입력 오류"},400);
  if(!Number.isFinite(Date.parse(b.date+"T00:00:00Z"))||new Date(b.date+"T00:00:00Z").toISOString().slice(0,10)!==b.date)return json({error:"날짜 오류"},400);
- if(a.minus>0&&!["free","card"].includes(b.debtOrigin))return json({error:"마이너스 사용 출처를 선택하세요"},400);
+ 
  const child=await env.DB.prepare("SELECT id FROM members WHERE family_id=? AND name=?").bind(me.family_id,b.child).first();
  if(!child)return json({error:"가족 구성원을 찾을 수 없습니다"},404);
  if(!me.is_admin&&me.name!==b.child)return json({error:"본인의 결제만 요청할 수 있습니다"},403);
  const requestId=typeof b.requestId==="string"&&/^split_[a-zA-Z0-9_-]{8,90}$/.test(b.requestId)?b.requestId:null;
  if(!requestId)return json({error:"요청 식별자가 올바르지 않습니다"},400);
- const stamp=new Date().toISOString(),tx={id:requestId,date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?b.debtOrigin:"",title:b.title.trim(),status:"pending",requestedBy:me.name,requestedById:me.id,createdAt:stamp};
+ const stamp=new Date().toISOString(),tx={id:requestId,date:b.date,type:"split_payment",wallet:"split",amount,allocations:{free:a.free,card:a.card,minus:a.minus},debtOrigin:a.minus?"card":"",title:b.title.trim(),status:"pending",requestedBy:me.name,requestedById:me.id,createdAt:stamp};
  for(let attempt=0;attempt<5;attempt++){
   const state=await env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key='allowance_ledger'").bind(me.family_id).first();
   if(!state)return json({error:"용돈 원장을 찾을 수 없습니다"},404);
