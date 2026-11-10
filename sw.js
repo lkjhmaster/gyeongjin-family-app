@@ -1,4 +1,4 @@
-const CACHE_NAME = "gyeongjin-family-v17.4-memory-photos";
+const CACHE_NAME = "gyeongjin-family-v17.5-reading-growth";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192-v2.png", "./icon-512-v2.png"];
 
 self.addEventListener("install", event => {

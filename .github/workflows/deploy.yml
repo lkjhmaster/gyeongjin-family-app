@@ -41,6 +41,7 @@ jobs:
           node scripts/test-split-payment.mjs
           node --test scripts/test-memory-photos.mjs
           node --test scripts/test-memory-photos-ui.cjs
+          node --test scripts/test-reading-growth.mjs
       - name: Require Cloudflare deployment credentials
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -59,6 +60,7 @@ jobs:
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0002_atomic_lifecycle.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0003_split_funding.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/memory-photos/0001_memory_photos.sql
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0001_reading_growth.sql
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -70,6 +72,8 @@ jobs:
           grep -q 'child_trade_one_pending_loan_per_borrower' /tmp/child-trade-index.txt
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='memory_photos';" | tee /tmp/memory-photos-table.txt
           grep -q 'memory_photos' /tmp/memory-photos-table.txt
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='reading_books';" | tee /tmp/reading-books-table.txt
+          grep -q 'reading_books' /tmp/reading-books-table.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
