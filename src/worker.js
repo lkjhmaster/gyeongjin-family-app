@@ -1,6 +1,7 @@
 import {planRepayment,validRepaymentSettlement} from './minus-repayment.js';
 import {processRecurringAtomic} from './recurring.js';
 import {childTradeLifecycle} from './child-transactions/lifecycle.js';
+import {readingGrowth} from './reading-growth.js';
 const JSON_HEADERS={"content-type":"application/json; charset=utf-8"};
 const CORS={"access-control-allow-origin":"https://gyeongjin-family-app.pages.dev","access-control-allow-methods":"GET,POST,PUT,OPTIONS","access-control-allow-headers":"authorization,content-type","vary":"Origin"};
 const enc=new TextEncoder();
@@ -48,6 +49,7 @@ if(url.pathname==="/api/setup"&&req.method==="POST"){const b=await body(req);if(
 if(url.pathname==="/api/login"&&req.method==="POST"){const b=await body(req);const m=await env.DB.prepare("SELECT * FROM members WHERE name=? LIMIT 1").bind(b.name||"").first();if(!m||await passwordHash(b.password||"",m.password_salt)!==m.password_hash)return json({error:"이름 또는 비밀번호를 확인해주세요."},401);const token=await createSession(m.id,env);return json({token,member:{id:m.id,name:m.name,role:m.role,isAdmin:!!m.is_admin,emoji:m.emoji}})}
 const me=await auth(req,env);if(!me)return json({error:"로그인이 필요합니다."},401);
 if(url.pathname.startsWith('/api/child-trades')){const result=await childTradeLifecycle(req,env,me,json);if(result)return result}
+if(url.pathname.startsWith('/api/reading/')){const result=await readingGrowth(req,env,me,json,url,id,body);if(result)return result}
 if(url.pathname==="/api/child-trades/participants"&&req.method==="GET"){
  if(me.is_admin)return json({error:"자녀 계정에서만 거래를 신청할 수 있습니다."},403);
  const rows=await env.DB.prepare("SELECT id,name,emoji FROM members WHERE family_id=? AND is_admin=0 AND id<>? ORDER BY name").bind(me.family_id,me.id).all();
