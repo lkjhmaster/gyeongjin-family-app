@@ -6,6 +6,9 @@ const CORS={"access-control-allow-origin":"https://gyeongjin-family-app.pages.de
 const enc=new TextEncoder();
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...JSON_HEADERS,...CORS}});
 const id=()=>crypto.randomUUID();
+const PHOTO_PREFIX="data:image/jpeg;base64,",PHOTO_MAX_CHARS=900000,PHOTO_FAMILY_MAX_CHARS=350000000,PHOTO_FAMILY_MAX_COUNT=3000,PHOTO_DAILY_MAX=100;
+const photoRefIds=photos=>(Array.isArray(photos)?photos:[]).filter(p=>typeof p==="string"&&/^photo:[0-9a-f-]{36}$/.test(p)).map(p=>p.slice(6));
+async function purgePhotos(env,familyId,photoIds){try{for(const photoId of photoIds)await env.DB.prepare("DELETE FROM memory_photos WHERE id=? AND family_id=?").bind(photoId,familyId).run()}catch(e){console.error("photo cleanup failed",e.message)}}
 const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
 async function digest(v){return hex(await crypto.subtle.digest("SHA-256",enc.encode(v)))}
 async function passwordHash(password,salt){let data=enc.encode(password+":"+salt);for(let i=0;i<120000;i++)data=new Uint8Array(await crypto.subtle.digest("SHA-256",data));return hex(data)}
@@ -577,15 +580,36 @@ if(url.pathname==="/api/memories/delete"&&req.method==="POST"){
  let entries;try{entries=JSON.parse(row.value_json)}catch{return json({error:"사진첩 데이터 오류"},500)}
  if(!Array.isArray(entries))return json({error:"사진첩 데이터 오류"},500);
  const index=entries.findIndex(x=>x.id===id);if(index<0)return json({error:"기록을 찾을 수 없습니다."},404);
- if(photoIndex===undefined){entries.splice(index,1)}else{
+ let gone=[];
+ if(photoIndex===undefined){gone=photoRefIds(entries[index].photos);entries.splice(index,1)}else{
  const entry=entries[index],photos=Array.isArray(entry.photos)?entry.photos.slice():(entry.photoData?[entry.photoData]:[]);
  if(photoIndex>=photos.length)return json({error:"사진을 찾을 수 없습니다."},404);
- photos.splice(photoIndex,1);entry.photos=photos;entry.photoData=photos[0]||"";entry.photoName=photos.length?entry.photoName:"";
+ gone=photoRefIds([photos[photoIndex]]);photos.splice(photoIndex,1);entry.photos=photos;entry.photoData="";entry.photoName=photos.length?entry.photoName:"";
  }
  const updated=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='memories' AND value_json=?").bind(JSON.stringify(entries),me.id,me.family_id,row.value_json).run();
- if(updated.meta?.changes===1)return json({ok:true,memories:entries});
+ if(updated.meta?.changes===1){await purgePhotos(env,me.family_id,gone);return json({ok:true,memories:entries})}
  }
  return json({error:"다른 가족이 수정했습니다. 새로고침 후 다시 시도해주세요."},409);
+}
+if(url.pathname==="/api/photos"&&req.method==="POST"){
+ const b=await body(req),dataUrl=b.dataUrl;
+ if(typeof dataUrl!=="string"||!dataUrl.startsWith(PHOTO_PREFIX)||!/^[A-Za-z0-9+/]+={0,2}$/.test(dataUrl.slice(PHOTO_PREFIX.length)))return json({error:"사진 형식을 확인해주세요."},400);
+ if(dataUrl.length>PHOTO_MAX_CHARS)return json({error:"사진 한 장의 크기가 너무 큽니다."},413);
+ try{
+  const used=await env.DB.prepare("SELECT COUNT(*) AS n,COALESCE(SUM(size),0) AS chars FROM memory_photos WHERE family_id=?").bind(me.family_id).first();
+  if(used.n>=PHOTO_FAMILY_MAX_COUNT||used.chars+dataUrl.length>PHOTO_FAMILY_MAX_CHARS)return json({error:"사진 저장 공간 한도에 가까워 더 올릴 수 없습니다. 관리자에게 알려주세요."},507);
+  const recent=await env.DB.prepare("SELECT COUNT(*) AS n FROM memory_photos WHERE created_by=? AND created_at>datetime('now','-1 day')").bind(me.id).first();
+  if(recent.n>=PHOTO_DAILY_MAX)return json({error:"하루에 올릴 수 있는 사진 수를 넘었습니다."},429);
+  const photoId=crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO memory_photos(id,family_id,data,size,created_by) VALUES(?,?,?,?,?)").bind(photoId,me.family_id,dataUrl,dataUrl.length,me.id).run();
+  return json({ok:true,id:photoId,ref:"photo:"+photoId});
+ }catch(e){if(/no such table/i.test(String(e.message)))return json({error:"사진 저장소를 준비 중입니다. 잠시 후 다시 시도해주세요."},503);throw e}
+}
+const photoMatch=url.pathname.match(/^\/api\/photos\/([0-9a-f-]{36})$/);
+if(photoMatch&&req.method==="GET"){
+ const row=await env.DB.prepare("SELECT data FROM memory_photos WHERE id=? AND family_id=?").bind(photoMatch[1],me.family_id).first();
+ if(!row)return json({error:"사진을 찾을 수 없습니다."},404);
+ return new Response(row.data,{status:200,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"private, max-age=31536000, immutable",...CORS}});
 }
 if(url.pathname==="/api/state"&&req.method==="GET"){const rows=await env.DB.prepare("SELECT state_key,value_json,updated_at FROM family_state WHERE family_id=?").bind(me.family_id).all();const state={};for(const r of rows.results||[]){try{state[r.state_key]=JSON.parse(r.value_json)}catch{}}return json({state})}
 if(url.pathname==="/api/state"&&req.method==="PUT"){const b=await body(req),allowed=new Set(["daily_schedules","family_schedules","monthly_memos","event","memories","member_albums","profile_photos","allowance_ledger","allowance_audit","allowance_limits","allowance_notices","savings_goals","chore_templates","chores","chore_daily_requests","household_ledger"]);if(!allowed.has(b.key))return json({error:"지원하지 않는 데이터 종류입니다."},400);if(['allowance_limits','allowance_audit'].includes(b.key)&&!me.is_admin)return json({error:'부모 관리자만 변경할 수 있습니다.'},403);if(b.key==="memories"&&!me.is_admin){
