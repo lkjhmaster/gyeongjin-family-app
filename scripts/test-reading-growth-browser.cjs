@@ -39,6 +39,9 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.match(await page.locator('h3').first().innerText(), /왜 그렇게/);
     for (const width of [320, 360, 768]) { await page.setViewportSize({width, height: 800}); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal scroll at ' + width); }
     await page.click('text=독후감'); await page.waitForSelector('text=내가 쓴 활동 답변 보기');
+    await page.evaluate(() => { currentAccount = {id: 'p', name: 'Parent', isAdmin: true}; readingView.book.book.status = 'review'; readingView.book.essays = [{version: 1, kind: 'draft', body: '제출한 독후감 본문', created_at: '2026-11-10'}]; readingView.tab = 'feedback'; readingRender(); });
+    await page.waitForSelector('text=제출한 독후감 본문');
+    assert.equal(await page.locator('#fbPraise').count(), 1, 'parent reads the essay above the feedback form');
     assert.deepEqual(errors, []);
     console.log('PASS reading growth browser: list, add book, locked tabs, autosave, restore, grade mode, essay tab, no overflow');
   } finally { await browser.close(); await new Promise(r => server.close(r)); }
