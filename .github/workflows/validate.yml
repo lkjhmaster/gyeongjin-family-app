@@ -44,6 +44,8 @@ jobs:
           node --test scripts/test-repayment.mjs
           node --test scripts/test-aggregate-repayment.mjs
           node --test scripts/test-wallet-balances.mjs
+          node --test scripts/test-memory-photos.mjs
+          node --test scripts/test-memory-photos-ui.cjs
 
       - name: Build Cloudflare API bundle
         run: npx --yes wrangler@4 deploy --config wrangler.api.jsonc --dry-run
@@ -55,6 +57,7 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-choice-dialog.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-aggregate-repayment-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-wallet-balances-browser.cjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-memory-photos-browser.cjs
 
       - name: Publish validation commit status
         if: ${{ always() }}
