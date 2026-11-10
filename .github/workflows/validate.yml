@@ -59,6 +59,7 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-aggregate-repayment-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-wallet-balances-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-memory-photos-browser.cjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-reading-growth-browser.cjs
 
       - name: Publish validation commit status
         if: ${{ always() }}
