@@ -92,6 +92,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.match(await page.locator('h3').first().innerText(), /다른 사람은 다르게/, 'parent sees answered questions whatever grade the child chose');
     assert.equal(await page.locator('textarea#readingAnswer').count(), 0, 'parent cannot edit the answer');
     assert.equal(await page.locator('text=몇 학년이야?').count(), 0, 'parent is never asked for a grade');
+    await page.evaluate(() => { readingView.book.timeline = [{at: '2026-11-12 11:10:00', actor: '첫째', action: 'created'}, {at: '2026-11-12 11:20:00', actor: '첫째', action: 'answer_saved', promptId: 'why3'}, {at: '2026-11-12 12:05:00', actor: '엄마', action: 'revision_requested'}]; readingView.tab = 'history'; readingRender(); });
+    const hist = await page.locator('.page').innerText();
+    assert.match(hist, /11\. ?12\.? 20:10|11\/12 20:10|11월 12일 20:10/, 'times are shown in Korea time');
+    assert.match(hist, /첫째/); assert.match(hist, /수정을 요청했어요/); assert.match(hist, /활동 답변을 썼어요 · 다른 사람은 다르게/, 'answer events name the question');
+    assert.ok(hist.indexOf('수정을 요청했어요') < hist.indexOf('기록을 만들었어요'), 'newest first');
+    await page.evaluate(() => { readingView.book.timeline = undefined; readingRender(); });
     assert.deepEqual(errors, []);
     console.log('PASS reading growth browser: list, add book, locked tabs, autosave, restore, grade mode, essay tab, no overflow');
   } finally { await browser.close(); await new Promise(r => server.close(r)); }
