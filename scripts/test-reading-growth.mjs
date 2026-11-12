@@ -127,16 +127,18 @@ test('migrations only add tables and are safe to run twice', () => {
   }
 });
 
-test('school year starts in March (Korea time) and grades advance one per school year, capped at 12th grade', () => {
+test('grades advance every January 1 (Korea time), one per year, capped at 12th grade', () => {
   assert.equal(schoolYearOf(new Date('2026-11-13T00:00:00+09:00')), 2026);
-  assert.equal(schoolYearOf(new Date('2027-02-28T23:59:00+09:00')), 2026);
-  assert.equal(schoolYearOf(new Date('2027-03-01T00:00:00+09:00')), 2027);
-  assert.equal(schoolYearOf(new Date('2027-02-28T15:00:00Z')), 2027, '2027-03-01 00:00 KST is still Feb 28 in UTC');
-  assert.equal(currentGrade(9, 2026, new Date('2026-12-01T00:00:00+09:00')), 9);
-  assert.equal(currentGrade(9, 2026, new Date('2027-03-02T00:00:00+09:00')), 10, '중3 becomes 고1');
-  assert.equal(currentGrade(6, 2026, new Date('2027-03-02T00:00:00+09:00')), 7, '초6 becomes 중1');
-  assert.equal(currentGrade(4, 2026, new Date('2028-03-02T00:00:00+09:00')), 6);
-  assert.equal(currentGrade(12, 2026, new Date('2030-03-02T00:00:00+09:00')), 12);
+  assert.equal(schoolYearOf(new Date('2026-12-31T23:59:00+09:00')), 2026);
+  assert.equal(schoolYearOf(new Date('2027-01-01T00:00:00+09:00')), 2027);
+  assert.equal(schoolYearOf(new Date('2026-12-31T15:00:00Z')), 2027, '2027-01-01 00:00 KST is still Dec 31 in UTC');
+  assert.equal(schoolYearOf(new Date('2027-03-01T00:00:00+09:00')), 2027, 'March changes nothing');
+  assert.equal(currentGrade(9, 2026, new Date('2026-12-31T00:00:00+09:00')), 9);
+  assert.equal(currentGrade(9, 2026, new Date('2027-01-02T00:00:00+09:00')), 10, '중3 becomes 고1');
+  assert.equal(currentGrade(6, 2026, new Date('2027-01-02T00:00:00+09:00')), 7, '초6 becomes 중1');
+  assert.equal(currentGrade(6, 2026, new Date('2027-02-15T00:00:00+09:00')), 7, 'no March delay');
+  assert.equal(currentGrade(4, 2026, new Date('2028-01-02T00:00:00+09:00')), 6);
+  assert.equal(currentGrade(12, 2026, new Date('2030-01-02T00:00:00+09:00')), 12);
 });
 
 test('a parent sets each child grade; the child reads only their own; others are refused', async () => {
