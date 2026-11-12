@@ -1,4 +1,5 @@
 const MAX_TITLE=100,MAX_AUTHOR=60,MAX_ANSWER=2000,MAX_ESSAY=10000,MAX_FEEDBACK=2000,MAX_QUESTIONS=5;
+const KINDS=["book","performance","exhibition"];
 const PROMPT_ID=/^[a-z0-9_]{1,30}$/;
 const text=(v,max)=>typeof v==="string"?v.trim().slice(0,max):"";
 const noTable=e=>/no such table/i.test(e?.message||"");
@@ -19,8 +20,8 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
  try{
   if(path==="/api/reading/books"&&req.method==="GET"){
    const rows=me.is_admin
-    ?(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at FROM reading_books b JOIN members m ON m.id=b.child_id WHERE b.family_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id).all()).results
-    :(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at FROM reading_books b JOIN members m ON m.id=b.child_id WHERE b.family_id=? AND b.child_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id,me.id).all()).results;
+    ?(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id WHERE b.family_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id).all()).results
+    :(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id WHERE b.family_id=? AND b.child_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id,me.id).all()).results;
    return json({ok:true,books:rows||[]});
   }
   if(path==="/api/reading/books"&&req.method==="POST"){
@@ -29,9 +30,12 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    let childId=me.id;
    if(me.is_admin&&b.childId){const child=await env.DB.prepare("SELECT id FROM members WHERE id=? AND family_id=? AND role='child'").bind(String(b.childId),me.family_id).first();if(!child)return json({error:"자녀를 찾을 수 없습니다."},404);childId=child.id}
    else if(me.role!=="child")return json({error:"자녀를 선택해주세요."},400);
+   const kind=b.kind===undefined?"book":b.kind;
+   if(!KINDS.includes(kind))return json({error:"종류를 확인해주세요."},400);
    const bookId=newId();
    await env.DB.prepare("INSERT INTO reading_books(id,family_id,child_id,title,author,created_by) VALUES(?,?,?,?,?,?)").bind(bookId,me.family_id,childId,title,author,me.id).run();
-   return json({ok:true,id:bookId},201);
+   if(kind!=="book"){try{await env.DB.prepare("INSERT INTO reading_book_kinds(book_id,kind) VALUES(?,?)").bind(bookId,kind).run()}catch(e){await env.DB.prepare("DELETE FROM reading_books WHERE id=?").bind(bookId).run();throw e}}
+   return json({ok:true,id:bookId,kind},201);
   }
   if(path==="/api/reading/book"&&req.method==="GET"){
    const book=await loadBook(env,me,url.searchParams.get("id"));
@@ -39,7 +43,8 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    const answers=(await env.DB.prepare("SELECT a.prompt_id,a.version,a.answer,a.created_at FROM reading_answers a WHERE a.book_id=? AND a.version=(SELECT MAX(version) FROM reading_answers x WHERE x.book_id=a.book_id AND x.prompt_id=a.prompt_id) ORDER BY a.created_at").bind(book.id).all()).results||[];
    const essays=(await env.DB.prepare("SELECT version,kind,body,created_at FROM reading_essays WHERE book_id=? ORDER BY version").bind(book.id).all()).results||[];
    const feedback=((await env.DB.prepare("SELECT id,essay_version,parent_id,praise,improve,questions_json,created_at FROM reading_feedback WHERE book_id=? ORDER BY created_at").bind(book.id).all()).results||[]).map(f=>{let questions=[];try{questions=JSON.parse(f.questions_json)}catch{}return {id:f.id,essayVersion:f.essay_version,parentId:f.parent_id,praise:f.praise,improve:f.improve,questions,createdAt:f.created_at}});
-   return json({ok:true,book:{id:book.id,childId:book.child_id,title:book.title,author:book.author,status:book.status},answers,essays,feedback});
+   const kindRow=await env.DB.prepare("SELECT kind FROM reading_book_kinds WHERE book_id=?").bind(book.id).first();
+   return json({ok:true,book:{id:book.id,childId:book.child_id,title:book.title,author:book.author,status:book.status,kind:kindRow?kindRow.kind:"book"},answers,essays,feedback});
   }
   if(path==="/api/reading/answers"&&req.method==="POST"){
    const b=await readBody(req),promptId=String(b.promptId||""),answer=text(b.answer,MAX_ANSWER);

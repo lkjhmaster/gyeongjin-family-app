@@ -9,6 +9,7 @@ async function database({migrate = true} = {}) {
   const sql = new DatabaseSync(':memory:');
   sql.exec(fs.readFileSync('schema.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0001_reading_growth.sql', 'utf8'));
+  if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0002_reading_kinds.sql', 'utf8'));
   for (const f of ['family', 'other']) sql.prepare('INSERT INTO families(id,name) VALUES(?,?)').run(f, f);
   const members = [['admin', 'family', '엄마', 'parent', 1], ['child', 'family', '첫째', 'child', 0], ['sibling', 'family', '둘째', 'child', 0], ['outsider', 'other', '이웃', 'parent', 1]];
   for (const [id, family, name, role, admin] of members) {
@@ -93,10 +94,30 @@ test('missing tables answer 503 instead of crashing', async () => {
   assert.equal((await call(db, 'GET', '/api/reading/books')).status, 503);
 });
 
-test('migration only adds tables and is safe to run twice', () => {
-  const sql = fs.readFileSync('migrations/reading-growth/0001_reading_growth.sql', 'utf8');
-  assert.doesNotMatch(sql.replace(/ON DELETE (CASCADE|SET NULL)/g, ''), /\b(DROP|ALTER|DELETE|UPDATE)\b/i);
+test('kinds: book is the default, performance and exhibition are stored and listed, bad kinds are refused', async () => {
+  const db = await database();
+  const make = async kind => (await call(db, 'POST', '/api/reading/books', {title: kind || '기본', kind}, 'child')).body;
+  const plain = await make(undefined), show = await make('performance'), expo = await make('exhibition');
+  assert.equal(plain.kind, 'book');
+  assert.equal((await call(db, 'POST', '/api/reading/books', {title: 'x', kind: 'movie'}, 'child')).status, 400);
+  const list = (await call(db, 'GET', '/api/reading/books', undefined, 'child')).body.books;
+  assert.deepEqual(Object.fromEntries(list.map(b => [b.id, b.kind])), {[plain.id]: 'book', [show.id]: 'performance', [expo.id]: 'exhibition'});
+  assert.equal((await call(db, 'GET', '/api/reading/book?id=' + show.id, undefined, 'admin')).body.book.kind, 'performance');
+  assert.equal((await call(db, 'GET', '/api/reading/book?id=' + plain.id, undefined, 'admin')).body.book.kind, 'book');
+});
+
+test('books created before kinds existed still read as books', async () => {
+  const db = await database();
+  db.sql.prepare("INSERT INTO reading_books(id,family_id,child_id,title) VALUES('old','family','child','옛 책')").run();
+  assert.equal((await call(db, 'GET', '/api/reading/books', undefined, 'child')).body.books[0].kind, 'book');
+});
+
+test('migrations only add tables and are safe to run twice', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync('schema.sql', 'utf8'));
-  db.exec(sql); db.exec(sql);
+  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql']) {
+    const sql = fs.readFileSync('migrations/reading-growth/' + file, 'utf8');
+    assert.doesNotMatch(sql.replace(/ON DELETE (CASCADE|SET NULL)/g, ''), /\b(DROP|ALTER|DELETE|UPDATE)\b/i);
+    db.exec(sql); db.exec(sql);
+  }
 });

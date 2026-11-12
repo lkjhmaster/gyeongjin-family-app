@@ -61,6 +61,7 @@ jobs:
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/child-trades/0003_split_funding.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/memory-photos/0001_memory_photos.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0001_reading_growth.sql
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0002_reading_kinds.sql
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -74,6 +75,8 @@ jobs:
           grep -q 'memory_photos' /tmp/memory-photos-table.txt
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='reading_books';" | tee /tmp/reading-books-table.txt
           grep -q 'reading_books' /tmp/reading-books-table.txt
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='reading_book_kinds';" | tee /tmp/reading-kinds-table.txt
+          grep -q 'reading_book_kinds' /tmp/reading-kinds-table.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
