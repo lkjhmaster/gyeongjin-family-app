@@ -70,7 +70,7 @@ test('viewer shows the placeholder first, then the loaded photo, and ignores sta
 });
 
 test('memory save paths upload photos and never store a duplicate photoData', () => {
-  assert.equal((html.match(/uploadMemoryPhoto\(await compressPhoto\(/g) || []).length, 3);
+  assert.equal((html.match(/uploadMemoryPhoto\(await compressPhoto\(/g) || []).length, 4); // 3 memory save paths + the reading cover
   assert.doesNotMatch(html, /photoData:photos\[0\]/);
   assert.doesNotMatch(html, /photos\.push\(await compressPhoto/);
   assert.match(html, /photoName:files\[0\]\?\.name\|\|'',photoData:'',photos\}/);

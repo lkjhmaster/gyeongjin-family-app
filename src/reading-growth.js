@@ -1,11 +1,17 @@
 const MAX_TITLE=100,MAX_AUTHOR=60,MAX_ANSWER=2000,MAX_ESSAY=10000,MAX_FEEDBACK=2000,MAX_QUESTIONS=5;
 const KINDS=["book","performance","exhibition"];
+const FORMATS={performance:["pansori","changgeuk","gugak","gugak_orch","opera","musical","orchestra","choir","play","dance","other"],exhibition:["art","photo","sculpture","museum","science","other"]};
+const PHOTO_REF=/^photo:[0-9a-f-]{36}$/;
 const PROMPT_ID=/^[a-z0-9_]{1,30}$/;
 export const schoolYearOf=(now=new Date())=>{const k=new Date(now.getTime()+9*3600*1000);return k.getUTCMonth()>=2?k.getUTCFullYear():k.getUTCFullYear()-1};
 export const currentGrade=(grade,setYear,now=new Date())=>Math.min(12,Math.max(1,grade+schoolYearOf(now)-setYear));
 const text=(v,max)=>typeof v==="string"?v.trim().slice(0,max):"";
 const noTable=e=>/no such table/i.test(e?.message||"");
 const unavailable=json=>json({error:"독서성장 저장소를 준비 중입니다. 잠시 후 다시 시도해주세요."},503);
+async function ownCover(env,me,cover){
+ if(typeof cover!=="string"||!PHOTO_REF.test(cover))return false;
+ return !!await env.DB.prepare("SELECT id FROM memory_photos WHERE id=? AND family_id=?").bind(cover.slice(6),me.family_id).first();
+}
 async function loadBook(env,me,bookId){
  const book=await env.DB.prepare("SELECT * FROM reading_books WHERE id=? AND family_id=?").bind(String(bookId||""),me.family_id).first();
  if(!book)return null;
@@ -36,8 +42,8 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
   }
   if(path==="/api/reading/books"&&req.method==="GET"){
    const rows=me.is_admin
-    ?(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id WHERE b.family_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id).all()).results
-    :(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id WHERE b.family_id=? AND b.child_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id,me.id).all()).results;
+    ?(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind,d.format,d.cover FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id LEFT JOIN reading_book_details d ON d.book_id=b.id WHERE b.family_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id).all()).results
+    :(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind,d.format,d.cover FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id LEFT JOIN reading_book_details d ON d.book_id=b.id WHERE b.family_id=? AND b.child_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id,me.id).all()).results;
    return json({ok:true,books:rows||[]});
   }
   if(path==="/api/reading/books"&&req.method==="POST"){
@@ -48,10 +54,17 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    else if(me.role!=="child")return json({error:"자녀를 선택해주세요."},400);
    const kind=b.kind===undefined?"book":b.kind;
    if(!KINDS.includes(kind))return json({error:"종류를 확인해주세요."},400);
+   const format=b.format==null||b.format===""?null:b.format;
+   if(format!==null&&!(FORMATS[kind]||[]).includes(format))return json({error:"형식을 확인해주세요."},400);
+   const cover=b.cover==null||b.cover===""?null:b.cover;
+   if(cover!==null&&!await ownCover(env,me,cover))return json({error:"표지 사진을 확인해주세요."},400);
    const bookId=newId();
    await env.DB.prepare("INSERT INTO reading_books(id,family_id,child_id,title,author,created_by) VALUES(?,?,?,?,?,?)").bind(bookId,me.family_id,childId,title,author,me.id).run();
-   if(kind!=="book"){try{await env.DB.prepare("INSERT INTO reading_book_kinds(book_id,kind) VALUES(?,?)").bind(bookId,kind).run()}catch(e){await env.DB.prepare("DELETE FROM reading_books WHERE id=?").bind(bookId).run();throw e}}
-   return json({ok:true,id:bookId,kind},201);
+   try{
+    if(kind!=="book")await env.DB.prepare("INSERT INTO reading_book_kinds(book_id,kind) VALUES(?,?)").bind(bookId,kind).run();
+    if(format!==null||cover!==null)await env.DB.prepare("INSERT INTO reading_book_details(book_id,format,cover) VALUES(?,?,?)").bind(bookId,format,cover).run();
+   }catch(e){await env.DB.prepare("DELETE FROM reading_books WHERE id=?").bind(bookId).run();throw e}
+   return json({ok:true,id:bookId,kind,format,cover},201);
   }
   if(path==="/api/reading/book"&&req.method==="GET"){
    const book=await loadBook(env,me,url.searchParams.get("id"));
@@ -59,8 +72,15 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    const answers=(await env.DB.prepare("SELECT a.prompt_id,a.version,a.answer,a.created_at FROM reading_answers a WHERE a.book_id=? AND a.version=(SELECT MAX(version) FROM reading_answers x WHERE x.book_id=a.book_id AND x.prompt_id=a.prompt_id) ORDER BY a.created_at").bind(book.id).all()).results||[];
    const essays=(await env.DB.prepare("SELECT version,kind,body,created_at FROM reading_essays WHERE book_id=? ORDER BY version").bind(book.id).all()).results||[];
    const feedback=((await env.DB.prepare("SELECT id,essay_version,parent_id,praise,improve,questions_json,created_at FROM reading_feedback WHERE book_id=? ORDER BY created_at").bind(book.id).all()).results||[]).map(f=>{let questions=[];try{questions=JSON.parse(f.questions_json)}catch{}return {id:f.id,essayVersion:f.essay_version,parentId:f.parent_id,praise:f.praise,improve:f.improve,questions,createdAt:f.created_at}});
-   const kindRow=await env.DB.prepare("SELECT kind FROM reading_book_kinds WHERE book_id=?").bind(book.id).first();
-   return json({ok:true,book:{id:book.id,childId:book.child_id,title:book.title,author:book.author,status:book.status,kind:kindRow?kindRow.kind:"book"},answers,essays,feedback});
+   const kindRow=await env.DB.prepare("SELECT kind FROM reading_book_kinds WHERE book_id=?").bind(book.id).first(),detail=await env.DB.prepare("SELECT format,cover FROM reading_book_details WHERE book_id=?").bind(book.id).first();
+   return json({ok:true,book:{id:book.id,childId:book.child_id,title:book.title,author:book.author,status:book.status,kind:kindRow?kindRow.kind:"book",format:detail?detail.format:null,cover:detail?detail.cover:null},answers,essays,feedback});
+  }
+  if(path==="/api/reading/cover"&&req.method==="POST"){
+   const b=await readBody(req),book=await loadBook(env,me,b.bookId);
+   if(!book||book.child_id!==me.id)return json({error:"기록을 찾을 수 없습니다."},404);
+   if(!await ownCover(env,me,b.cover))return json({error:"표지 사진을 확인해주세요."},400);
+   await env.DB.prepare("INSERT INTO reading_book_details(book_id,cover) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET cover=excluded.cover").bind(book.id,b.cover).run();
+   return json({ok:true});
   }
   if(path==="/api/reading/answers"&&req.method==="POST"){
    const b=await readBody(req),promptId=String(b.promptId||""),answer=text(b.answer,MAX_ANSWER);
