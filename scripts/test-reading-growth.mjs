@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/worker.js';
+import {schoolYearOf, currentGrade} from '../src/reading-growth.js';
 
 const tokenHash = async token => Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))).toString('hex');
 async function database({migrate = true} = {}) {
@@ -10,6 +11,7 @@ async function database({migrate = true} = {}) {
   sql.exec(fs.readFileSync('schema.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0001_reading_growth.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0002_reading_kinds.sql', 'utf8'));
+  if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0003_reading_levels.sql', 'utf8'));
   for (const f of ['family', 'other']) sql.prepare('INSERT INTO families(id,name) VALUES(?,?)').run(f, f);
   const members = [['admin', 'family', '엄마', 'parent', 1], ['child', 'family', '첫째', 'child', 0], ['sibling', 'family', '둘째', 'child', 0], ['outsider', 'other', '이웃', 'parent', 1]];
   for (const [id, family, name, role, admin] of members) {
@@ -115,9 +117,46 @@ test('books created before kinds existed still read as books', async () => {
 test('migrations only add tables and are safe to run twice', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync('schema.sql', 'utf8'));
-  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql']) {
+  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql', '0003_reading_levels.sql']) {
     const sql = fs.readFileSync('migrations/reading-growth/' + file, 'utf8');
     assert.doesNotMatch(sql.replace(/ON DELETE (CASCADE|SET NULL)/g, ''), /\b(DROP|ALTER|DELETE|UPDATE)\b/i);
     db.exec(sql); db.exec(sql);
   }
+});
+
+test('school year starts in March (Korea time) and grades advance one per school year, capped at 12th grade', () => {
+  assert.equal(schoolYearOf(new Date('2026-11-13T00:00:00+09:00')), 2026);
+  assert.equal(schoolYearOf(new Date('2027-02-28T23:59:00+09:00')), 2026);
+  assert.equal(schoolYearOf(new Date('2027-03-01T00:00:00+09:00')), 2027);
+  assert.equal(schoolYearOf(new Date('2027-02-28T15:00:00Z')), 2027, '2027-03-01 00:00 KST is still Feb 28 in UTC');
+  assert.equal(currentGrade(9, 2026, new Date('2026-12-01T00:00:00+09:00')), 9);
+  assert.equal(currentGrade(9, 2026, new Date('2027-03-02T00:00:00+09:00')), 10, '중3 becomes 고1');
+  assert.equal(currentGrade(6, 2026, new Date('2027-03-02T00:00:00+09:00')), 7, '초6 becomes 중1');
+  assert.equal(currentGrade(4, 2026, new Date('2028-03-02T00:00:00+09:00')), 6);
+  assert.equal(currentGrade(12, 2026, new Date('2030-03-02T00:00:00+09:00')), 12);
+});
+
+test('a parent sets each child grade; the child reads only their own; others are refused', async () => {
+  const db = await database();
+  assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'child')).body.me, null, 'unset until a parent sets it');
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'child', grade: 9}, 'child')).status, 403);
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'child', grade: 13}, 'admin')).status, 400);
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'child', grade: 2.5}, 'admin')).status, 400);
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'outsider', grade: 3}, 'admin')).status, 404, 'not a child of this family');
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'admin', grade: 3}, 'admin')).status, 404, 'parents have no grade');
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'child', grade: 9}, 'admin')).status, 200);
+  assert.equal((await call(db, 'POST', '/api/reading/levels', {childId: 'child', grade: 8}, 'admin')).status, 200, 'setting again replaces it');
+  assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'child')).body.me, 8);
+  assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'sibling')).body.me, null);
+  const list = (await call(db, 'GET', '/api/reading/levels', undefined, 'admin')).body.children;
+  assert.deepEqual(list.map(c => [c.id, c.grade]).sort(), [['child', 8], ['sibling', null]]);
+  assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'outsider')).body.children.length, 0, 'other families see nothing of ours');
+});
+
+test('a stored grade advances by itself when the school year changes', async () => {
+  const db = await database(), year = schoolYearOf();
+  db.sql.prepare("INSERT INTO reading_levels(member_id,grade,school_year) VALUES('child',6,?)").run(year - 1);
+  assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'child')).body.me, 7);
+  db.sql.prepare("INSERT INTO reading_levels(member_id,grade,school_year) VALUES('sibling',4,?)").run(year);
+  assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'sibling')).body.me, 4);
 });

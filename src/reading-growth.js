@@ -1,6 +1,8 @@
 const MAX_TITLE=100,MAX_AUTHOR=60,MAX_ANSWER=2000,MAX_ESSAY=10000,MAX_FEEDBACK=2000,MAX_QUESTIONS=5;
 const KINDS=["book","performance","exhibition"];
 const PROMPT_ID=/^[a-z0-9_]{1,30}$/;
+export const schoolYearOf=(now=new Date())=>{const k=new Date(now.getTime()+9*3600*1000);return k.getUTCMonth()>=2?k.getUTCFullYear():k.getUTCFullYear()-1};
+export const currentGrade=(grade,setYear,now=new Date())=>Math.min(12,Math.max(1,grade+schoolYearOf(now)-setYear));
 const text=(v,max)=>typeof v==="string"?v.trim().slice(0,max):"";
 const noTable=e=>/no such table/i.test(e?.message||"");
 const unavailable=json=>json({error:"독서성장 저장소를 준비 중입니다. 잠시 후 다시 시도해주세요."},503);
@@ -18,6 +20,20 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
  const path=url.pathname;
  if(!path.startsWith("/api/reading/"))return null;
  try{
+  if(path==="/api/reading/levels"&&req.method==="GET"){
+   if(!me.is_admin){const row=await env.DB.prepare("SELECT grade,school_year FROM reading_levels WHERE member_id=?").bind(me.id).first();return json({ok:true,me:row?currentGrade(row.grade,row.school_year):null})}
+   const rows=(await env.DB.prepare("SELECT m.id,m.name,l.grade,l.school_year FROM members m LEFT JOIN reading_levels l ON l.member_id=m.id WHERE m.family_id=? AND m.role='child' ORDER BY m.name").bind(me.family_id).all()).results||[];
+   return json({ok:true,me:null,children:rows.map(r=>({id:r.id,name:r.name,grade:r.grade==null?null:currentGrade(r.grade,r.school_year)}))});
+  }
+  if(path==="/api/reading/levels"&&req.method==="POST"){
+   if(!me.is_admin)return json({error:"부모 관리자만 학년을 정할 수 있습니다."},403);
+   const b=await readBody(req),grade=Number(b.grade);
+   if(!Number.isInteger(grade)||grade<1||grade>12)return json({error:"학년을 확인해주세요."},400);
+   const child=await env.DB.prepare("SELECT id FROM members WHERE id=? AND family_id=? AND role='child'").bind(String(b.childId||""),me.family_id).first();
+   if(!child)return json({error:"자녀를 찾을 수 없습니다."},404);
+   await env.DB.prepare("INSERT INTO reading_levels(member_id,grade,school_year,updated_by) VALUES(?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET grade=excluded.grade,school_year=excluded.school_year,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP").bind(child.id,grade,schoolYearOf(),me.id).run();
+   return json({ok:true,grade});
+  }
   if(path==="/api/reading/books"&&req.method==="GET"){
    const rows=me.is_admin
     ?(await env.DB.prepare("SELECT b.id,b.child_id,m.name child_name,b.title,b.author,b.status,b.created_at,b.updated_at,COALESCE(k.kind,'book') kind FROM reading_books b JOIN members m ON m.id=b.child_id LEFT JOIN reading_book_kinds k ON k.book_id=b.id WHERE b.family_id=? ORDER BY b.updated_at DESC LIMIT 200").bind(me.family_id).all()).results
