@@ -12,6 +12,8 @@ async function database({migrate = true} = {}) {
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0001_reading_growth.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0002_reading_kinds.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0003_reading_levels.sql', 'utf8'));
+  if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0004_reading_details.sql', 'utf8'));
+  if (migrate) sql.exec(fs.readFileSync('migrations/memory-photos/0001_memory_photos.sql', 'utf8'));
   for (const f of ['family', 'other']) sql.prepare('INSERT INTO families(id,name) VALUES(?,?)').run(f, f);
   const members = [['admin', 'family', '엄마', 'parent', 1], ['child', 'family', '첫째', 'child', 0], ['sibling', 'family', '둘째', 'child', 0], ['outsider', 'other', '이웃', 'parent', 1]];
   for (const [id, family, name, role, admin] of members) {
@@ -117,7 +119,7 @@ test('books created before kinds existed still read as books', async () => {
 test('migrations only add tables and are safe to run twice', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync('schema.sql', 'utf8'));
-  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql', '0003_reading_levels.sql']) {
+  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql', '0003_reading_levels.sql', '0004_reading_details.sql']) {
     const sql = fs.readFileSync('migrations/reading-growth/' + file, 'utf8');
     assert.doesNotMatch(sql.replace(/ON DELETE (CASCADE|SET NULL)/g, ''), /\b(DROP|ALTER|DELETE|UPDATE)\b/i);
     db.exec(sql); db.exec(sql);
@@ -159,4 +161,37 @@ test('a stored grade advances by itself when the school year changes', async () 
   assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'child')).body.me, 7);
   db.sql.prepare("INSERT INTO reading_levels(member_id,grade,school_year) VALUES('sibling',4,?)").run(year);
   assert.equal((await call(db, 'GET', '/api/reading/levels', undefined, 'sibling')).body.me, 4);
+});
+
+test('formats: only valid formats for the kind are accepted and they come back in lists and details', async () => {
+  const db = await database();
+  const make = (kind, format) => call(db, 'POST', '/api/reading/books', {title: kind + format, kind, format}, 'child');
+  const orch = await make('performance', 'gugak_orch');
+  assert.equal(orch.status, 201); assert.equal(orch.body.format, 'gugak_orch');
+  assert.equal((await make('performance', 'art')).status, 400, 'an exhibition format is not a performance format');
+  assert.equal((await make('exhibition', 'museum')).status, 201);
+  assert.equal((await make('book', 'opera')).status, 400, 'books have no format');
+  assert.equal((await make('performance', 'nope')).status, 400);
+  assert.equal((await call(db, 'POST', '/api/reading/books', {title: '판소리 공연', kind: 'performance'}, 'child')).body.format, null, 'format is optional');
+  assert.equal((await call(db, 'GET', '/api/reading/book?id=' + orch.body.id, undefined, 'admin')).body.book.format, 'gugak_orch');
+  const list = (await call(db, 'GET', '/api/reading/books', undefined, 'child')).body.books;
+  assert.deepEqual(list.map(b => b.format).sort(), ['gugak_orch', 'museum', null]);
+});
+
+test('cover photos must be photos stored by the same family and can be added later by the owner only', async () => {
+  const db = await database(), ref = id => 'photo:' + id;
+  db.sql.prepare("INSERT INTO memory_photos(id,family_id,data,size) VALUES('123e4567-e89b-42d3-a456-426614174000','family','x',1)").run();
+  db.sql.prepare("INSERT INTO memory_photos(id,family_id,data,size) VALUES('223e4567-e89b-42d3-a456-426614174000','other','x',1)").run();
+  const mine = ref('123e4567-e89b-42d3-a456-426614174000'), theirs = ref('223e4567-e89b-42d3-a456-426614174000');
+  assert.equal((await call(db, 'POST', '/api/reading/books', {title: 'a', cover: theirs}, 'child')).status, 400, 'another family photo');
+  assert.equal((await call(db, 'POST', '/api/reading/books', {title: 'a', cover: 'data:image/jpeg;base64,AAAA'}, 'child')).status, 400, 'inline data is not accepted');
+  assert.equal((await call(db, 'POST', '/api/reading/books', {title: 'a', cover: 'photo:../../x'}, 'child')).status, 400);
+  assert.equal(db.sql.prepare('SELECT COUNT(*) n FROM reading_books').get().n, 0, 'a refused cover creates nothing');
+  const made = await call(db, 'POST', '/api/reading/books', {title: '표지 책', cover: mine}, 'child');
+  assert.equal(made.body.cover, mine);
+  const plain = (await call(db, 'POST', '/api/reading/books', {title: '나중에'}, 'child')).body.id;
+  assert.equal((await call(db, 'POST', '/api/reading/cover', {bookId: plain, cover: mine}, 'admin')).status, 404, 'parents do not change a child record');
+  assert.equal((await call(db, 'POST', '/api/reading/cover', {bookId: plain, cover: theirs}, 'child')).status, 400);
+  assert.equal((await call(db, 'POST', '/api/reading/cover', {bookId: plain, cover: mine}, 'child')).status, 200);
+  assert.equal((await call(db, 'GET', '/api/reading/book?id=' + plain, undefined, 'admin')).body.book.cover, mine);
 });
