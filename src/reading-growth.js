@@ -3,7 +3,8 @@ const KINDS=["book","performance","exhibition"];
 const FORMATS={performance:["pansori","changgeuk","gugak","gugak_orch","opera","musical","orchestra","choir","play","dance","other"],exhibition:["art","photo","sculpture","museum","science","other"]};
 const PHOTO_REF=/^photo:[0-9a-f-]{36}$/;
 const PROMPT_ID=/^[a-z0-9_]{1,30}$/;
-export const schoolYearOf=(now=new Date())=>{const k=new Date(now.getTime()+9*3600*1000);return k.getUTCMonth()>=2?k.getUTCFullYear():k.getUTCFullYear()-1};
+// Grades advance every January 1 (Korea time), by the family's choice. The calendar year is therefore the "school year".
+export const schoolYearOf=(now=new Date())=>new Date(now.getTime()+9*3600*1000).getUTCFullYear();
 export const currentGrade=(grade,setYear,now=new Date())=>Math.min(12,Math.max(1,grade+schoolYearOf(now)-setYear));
 const text=(v,max)=>typeof v==="string"?v.trim().slice(0,max):"";
 const noTable=e=>/no such table/i.test(e?.message||"");
