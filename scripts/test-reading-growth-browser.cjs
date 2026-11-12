@@ -15,8 +15,10 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       if (url.pathname === '/api/reading/levels' && req.method() === 'GET') return ok({ok: true, me: db.grade, children: [{id: 'kid', name: '첫째', grade: db.grade}]});
       if (url.pathname === '/api/reading/levels') { const b = JSON.parse(req.postData()); posts.push(['grade', b]); db.grade = b.grade; return ok({ok: true, grade: b.grade}); }
       if (url.pathname === '/api/reading/books' && req.method() === 'GET') return ok({ok: true, books: db.books});
-      if (url.pathname === '/api/reading/books') { const b = JSON.parse(req.postData()); posts.push(['book', b]); const nid = 'b' + (db.books.length + 1); db.books.unshift({id: nid, child_id: 'kid', child_name: '첫째', title: b.title, author: b.author, status: 'reading', kind: b.kind}); return route.fulfill({status: 201, headers: cors, json: {ok: true, id: nid}}); }
-      if (url.pathname === '/api/reading/book') return ok({ok: true, book: {id: url.searchParams.get('id'), childId: 'kid', title: db.books.find(b => b.id === url.searchParams.get('id')).title, author: '', kind: db.books.find(b => b.id === url.searchParams.get('id')).kind || 'book', status: db.books.find(b => b.id === url.searchParams.get('id')).status}, answers: db.answers, essays: db.essays, feedback: db.feedback});
+      if (url.pathname === '/api/reading/books') { const b = JSON.parse(req.postData()); posts.push(['book', b]); const nid = 'b' + (db.books.length + 1); db.books.unshift({id: nid, child_id: 'kid', child_name: '첫째', title: b.title, author: b.author, status: 'reading', kind: b.kind, format: b.format || null, cover: b.cover || null}); return route.fulfill({status: 201, headers: cors, json: {ok: true, id: nid}}); }
+      if (url.pathname === '/api/reading/book') return ok({ok: true, book: {id: url.searchParams.get('id'), childId: 'kid', title: db.books.find(b => b.id === url.searchParams.get('id')).title, author: '', kind: db.books.find(b => b.id === url.searchParams.get('id')).kind || 'book', format: db.books.find(b => b.id === url.searchParams.get('id')).format || null, cover: db.books.find(b => b.id === url.searchParams.get('id')).cover || null, status: db.books.find(b => b.id === url.searchParams.get('id')).status}, answers: db.answers, essays: db.essays, feedback: db.feedback});
+      if (url.pathname === '/api/photos' && req.method() === 'POST') { posts.push(['photo']); return route.fulfill({status: 201, headers: cors, json: {ok: true, ref: 'photo:123e4567-e89b-42d3-a456-426614174000'}}); }
+      if (url.pathname === '/api/reading/cover') { const b = JSON.parse(req.postData()); posts.push(['cover', b]); db.books.find(x => x.id === b.bookId).cover = b.cover; return ok({ok: true}); }
       if (url.pathname === '/api/reading/answers') { const b = JSON.parse(req.postData()); posts.push(['answer', b]); const cur = db.answers.find(a => a.prompt_id === b.promptId); if (cur) cur.answer = b.answer; else db.answers.push({prompt_id: b.promptId, answer: b.answer, version: 1}); return route.fulfill({status: 201, headers: cors, json: {ok: true, version: 1}}); }
       return route.fulfill({status: 401, headers: cors, json: {error: 'login'}});
     });
@@ -38,7 +40,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.evaluate(() => { currentAccount = {id: 'kid', name: '첫째', isAdmin: false}; reading(); });
     await page.waitForSelector('text=새 책'); await page.evaluate(() => readingOpen('b3')); await page.waitForSelector('textarea#readingAnswer');
     assert.match(await page.locator('small').first().innerText(), /1 \/ 5/, 'grade 6 gets 5 questions');
-    assert.deepEqual(posts[0], ['book', {title: '새 책', author: '', kind: 'book'}]);
+    assert.deepEqual(posts[0], ['book', {title: '새 책', author: '', kind: 'book', format: '', cover: ''}]);
     assert.equal(await page.locator('button[disabled]:has-text("독후감")').count(), 1, 'essay tab locked for a brand-new book');
     assert.match(await page.locator('h3').first().innerText(), /왜 골랐어/);
     await page.fill('#readingAnswer', '표지가 예뻐서'); await page.waitForSelector('text=저장됐어요');
@@ -47,8 +49,10 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.click('text=← 이전'); assert.equal(await page.inputValue('#readingAnswer'), '표지가 예뻐서', 'answer is restored');
     await page.evaluate(() => { readingView.myGrade = 4; readingRender(); }); assert.match(await page.locator('small').first().innerText(), /1 \/ 4/, 'grade 4 gets 4 questions');
     await page.evaluate(() => { readingView.myGrade = 8; readingRender(); }); assert.match(await page.locator('small').first().innerText(), /1 \/ 6/, 'middle school gets 6 questions');
-    for (let i = 0; i < 4; i++) await page.click('text=다음 →');
+    for (let i = 0; i < 3; i++) await page.click('text=다음 →');
     assert.match(await page.locator('h3').first().innerText(), /다른 사람은 다르게/);
+    await page.click('text=다음 →'); assert.match(await page.locator('h3').first().innerText(), /달랐던 점/);
+    assert.match(await page.locator('small').first().innerText(), /다녀온 뒤|읽은 뒤/, 'later questions are the after-visit part');
     await page.click('text=다음 →'); assert.match(await page.locator('h3').first().innerText(), /말하고 싶은 한 가지/);
     for (const width of [320, 360, 768]) { await page.setViewportSize({width, height: 800}); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal scroll at ' + width); }
     await page.click('text=독후감'); await page.waitForSelector('text=내가 쓴 활동 답변 보기');
@@ -58,11 +62,25 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.evaluate(() => { currentAccount = {id: 'kid', name: '첫째', isAdmin: false}; reading(); }); await page.waitForSelector('#readingKind');
     await page.selectOption('#readingKind', 'performance');
     assert.equal(await page.locator('#readingPlaceLabel').innerText(), '장소 (선택)');
+    assert.equal(await page.locator('#readingFormat option:has-text("국악관현악")').count(), 1, 'gugak orchestra is a performance format');
+    assert.equal(await page.locator('#readingFormat option:has-text("미술")').count(), 0, 'exhibition formats are not offered for performances');
+    await page.selectOption('#readingKind', 'exhibition'); assert.equal(await page.locator('#readingFormat option:has-text("미술")').count(), 1);
+    await page.selectOption('#readingKind', 'book'); assert.equal(await page.locator('#readingFormatField').isVisible(), false, 'books have no format');
+    await page.selectOption('#readingKind', 'performance');
+    await page.selectOption('#readingFormat', 'pansori');
+    await page.setInputFiles('#readingCover', {name: 'poster.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')});
     await page.fill('#readingTitle', '화충선생젼'); await page.click('text=기록 추가');
     await page.waitForSelector('textarea#readingAnswer');
-    assert.deepEqual(posts.at(-1), ['book', {title: '화충선생젼', author: '', kind: 'performance'}]);
-    assert.match(await page.locator('h3').first().innerText(), /이 공연을 왜 보러 갔어/);
+    assert.deepEqual(posts.at(-1), ['book', {title: '화충선생젼', author: '', kind: 'performance', format: 'pansori', cover: 'photo:123e4567-e89b-42d3-a456-426614174000'}]);
+    assert.equal(await page.locator('img[data-photo-ref]').count(), 1, 'the poster is shown');
+    assert.match(await page.locator('small').first().innerText(), /가기 전/, 'the first question is the before-visit part');
+    assert.match(await page.locator('h3').first().innerText(), /판소리는 어떤 대목/, 'questions follow the chosen format');
     await page.fill('#readingAnswer', '판소리라서'); await page.waitForSelector('text=저장됐어요');
+    await page.evaluate(() => readingOpen('b1')); await page.waitForSelector('text=표지·포스터 사진 추가');
+    await page.setInputFiles('input[type=file]', {name: 'cover.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')});
+    await page.waitForFunction(() => !document.body.innerText.includes('표지·포스터 사진 추가'));
+    assert.deepEqual(posts.at(-1), ['cover', {bookId: 'b1', cover: 'photo:123e4567-e89b-42d3-a456-426614174000'}]);
+    await page.evaluate(() => readingOpen('b4')); await page.waitForSelector('textarea#readingAnswer');
     await page.click('text=감상문');
     await page.waitForSelector('text=내가 쓴 활동 답변 보기');
     await page.evaluate(() => reading()); await page.waitForSelector('text=화충선생젼');
