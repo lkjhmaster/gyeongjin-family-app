@@ -13,8 +13,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       const req = route.request(), url = new URL(req.url()), ok = json => route.fulfill({status: 200, headers: cors, json});
       if (req.method() === 'OPTIONS') return route.fulfill({status: 204, headers: cors});
       if (url.pathname === '/api/reading/books' && req.method() === 'GET') return ok({ok: true, books: db.books});
-      if (url.pathname === '/api/reading/books') { const b = JSON.parse(req.postData()); posts.push(['book', b]); db.books.unshift({id: 'b3', child_id: 'kid', child_name: '첫째', title: b.title, author: b.author, status: 'reading'}); return route.fulfill({status: 201, headers: cors, json: {ok: true, id: 'b3'}}); }
-      if (url.pathname === '/api/reading/book') return ok({ok: true, book: {id: url.searchParams.get('id'), childId: 'kid', title: db.books.find(b => b.id === url.searchParams.get('id')).title, author: '', status: db.books.find(b => b.id === url.searchParams.get('id')).status}, answers: db.answers, essays: db.essays, feedback: db.feedback});
+      if (url.pathname === '/api/reading/books') { const b = JSON.parse(req.postData()); posts.push(['book', b]); const nid = 'b' + (db.books.length + 1); db.books.unshift({id: nid, child_id: 'kid', child_name: '첫째', title: b.title, author: b.author, status: 'reading', kind: b.kind}); return route.fulfill({status: 201, headers: cors, json: {ok: true, id: nid}}); }
+      if (url.pathname === '/api/reading/book') return ok({ok: true, book: {id: url.searchParams.get('id'), childId: 'kid', title: db.books.find(b => b.id === url.searchParams.get('id')).title, author: '', kind: db.books.find(b => b.id === url.searchParams.get('id')).kind || 'book', status: db.books.find(b => b.id === url.searchParams.get('id')).status}, answers: db.answers, essays: db.essays, feedback: db.feedback});
       if (url.pathname === '/api/reading/answers') { const b = JSON.parse(req.postData()); posts.push(['answer', b]); const cur = db.answers.find(a => a.prompt_id === b.promptId); if (cur) cur.answer = b.answer; else db.answers.push({prompt_id: b.promptId, answer: b.answer, version: 1}); return route.fulfill({status: 201, headers: cors, json: {ok: true, version: 1}}); }
       return route.fulfill({status: 401, headers: cors, json: {error: 'login'}});
     });
@@ -24,9 +24,9 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.waitForSelector('text=어린 왕자');
     assert.equal(await page.locator('text=완료한 책').count(), 1);
     assert.equal(await page.locator('#nav-reading').count(), 1);
-    await page.fill('#readingTitle', '새 책'); await page.click('text=책 추가');
+    await page.fill('#readingTitle', '새 책'); await page.click('text=기록 추가');
     await page.waitForSelector('textarea#readingAnswer');
-    assert.deepEqual(posts[0], ['book', {title: '새 책', author: ''}]);
+    assert.deepEqual(posts[0], ['book', {title: '새 책', author: '', kind: 'book'}]);
     assert.equal(await page.locator('button[disabled]:has-text("독후감")').count(), 1, 'essay tab locked for a brand-new book');
     assert.match(await page.locator('h3').first().innerText(), /왜 골랐어/);
     await page.fill('#readingAnswer', '표지가 예뻐서'); await page.waitForSelector('text=저장됐어요');
@@ -42,6 +42,21 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.evaluate(() => { currentAccount = {id: 'p', name: 'Parent', isAdmin: true}; readingView.book.book.status = 'review'; readingView.book.essays = [{version: 1, kind: 'draft', body: '제출한 독후감 본문', created_at: '2026-11-10'}]; readingView.tab = 'feedback'; readingRender(); });
     await page.waitForSelector('text=제출한 독후감 본문');
     assert.equal(await page.locator('#fbPraise').count(), 1, 'parent reads the essay above the feedback form');
+    await page.evaluate(() => { currentAccount = {id: 'kid', name: '첫째', isAdmin: false}; reading(); }); await page.waitForSelector('#readingKind');
+    await page.selectOption('#readingKind', 'performance');
+    assert.equal(await page.locator('#readingPlaceLabel').innerText(), '장소 (선택)');
+    await page.fill('#readingTitle', '화충선생젼'); await page.click('text=기록 추가');
+    await page.waitForSelector('textarea#readingAnswer');
+    assert.deepEqual(posts.at(-1), ['book', {title: '화충선생젼', author: '', kind: 'performance'}]);
+    assert.match(await page.locator('h3').first().innerText(), /이 공연을 왜 보러 갔어/);
+    await page.fill('#readingAnswer', '판소리라서'); await page.waitForSelector('text=저장됐어요');
+    await page.click('text=감상문');
+    await page.waitForSelector('text=내가 쓴 활동 답변 보기');
+    await page.evaluate(() => reading()); await page.waitForSelector('text=화충선생젼');
+    await page.click('button:has-text("공연")');
+    await page.waitForFunction(() => !document.body.innerText.includes('어린 왕자') && document.body.innerText.includes('화충선생젼'));
+    assert.equal(await page.locator('text=어린 왕자').count(), 0, 'filter hides other kinds');
+    assert.equal(await page.locator('text=화충선생젼').count(), 1);
     assert.deepEqual(errors, []);
     console.log('PASS reading growth browser: list, add book, locked tabs, autosave, restore, grade mode, essay tab, no overflow');
   } finally { await browser.close(); await new Promise(r => server.close(r)); }
