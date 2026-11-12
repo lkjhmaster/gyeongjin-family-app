@@ -64,6 +64,7 @@ jobs:
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0002_reading_kinds.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0003_reading_levels.sql
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0004_reading_details.sql
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --file=migrations/reading-growth/0005_reading_events.sql
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -83,6 +84,8 @@ jobs:
           grep -q 'reading_levels' /tmp/reading-levels-table.txt
           npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='reading_book_details';" | tee /tmp/reading-details-table.txt
           grep -q 'reading_book_details' /tmp/reading-details-table.txt
+          npx --yes wrangler@4 d1 execute gyeongjin-family-db --config wrangler.api.jsonc --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name='reading_events';" | tee /tmp/reading-events-table.txt
+          grep -q 'reading_events' /tmp/reading-events-table.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

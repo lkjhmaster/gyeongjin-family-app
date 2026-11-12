@@ -8,6 +8,20 @@ export const currentGrade=(grade,setYear,now=new Date())=>Math.min(12,Math.max(1
 const text=(v,max)=>typeof v==="string"?v.trim().slice(0,max):"";
 const noTable=e=>/no such table/i.test(e?.message||"");
 const unavailable=json=>json({error:"독서성장 저장소를 준비 중입니다. 잠시 후 다시 시도해주세요."},503);
+async function logEvent(env,newId,bookId,actorId,action){
+ try{await env.DB.prepare("INSERT INTO reading_events(id,book_id,actor_id,action) VALUES(?,?,?,?)").bind(newId(),bookId,actorId,action).run()}catch(e){console.warn("reading event not recorded",action,e&&e.message)}
+}
+async function buildTimeline(env,book){
+ const all=async(sql,...a)=>{try{return (await env.DB.prepare(sql).bind(...a).all()).results||[]}catch(e){if(noTable(e))return[];throw e}};
+ const names=new Map((await all("SELECT id,name FROM members WHERE family_id=?",book.family_id)).map(m=>[m.id,m.name])),who=id=>names.get(id)||"";
+ const out=[{at:book.created_at,actor:who(book.created_by||book.child_id),action:"created"}];
+ for(const a of await all("SELECT prompt_id,version,created_at FROM reading_answers WHERE book_id=?",book.id))out.push({at:a.created_at,actor:who(book.child_id),action:a.version>1?"answer_edited":"answer_saved",promptId:a.prompt_id,version:a.version});
+ for(const e of await all("SELECT version,kind,created_at,created_by FROM reading_essays WHERE book_id=?",book.id))out.push({at:e.created_at,actor:who(e.created_by||book.child_id),action:e.kind==="final"?"finalized":"essay_saved",version:e.version,essayKind:e.kind});
+ for(const f of await all("SELECT essay_version,parent_id,created_at FROM reading_feedback WHERE book_id=?",book.id))out.push({at:f.created_at,actor:who(f.parent_id),action:"feedback",version:f.essay_version});
+ for(const v of await all("SELECT actor_id,action,created_at FROM reading_events WHERE book_id=?",book.id))out.push({at:v.created_at,actor:who(v.actor_id),action:v.action==="submit"?"submitted":"revision_requested"});
+ const rank={created:0,answer_saved:1,answer_edited:1,essay_saved:2,submitted:3,feedback:4,revision_requested:5,finalized:6};
+ return out.sort((a,b)=>String(a.at).localeCompare(String(b.at))||rank[a.action]-rank[b.action]);
+}
 async function ownCover(env,me,cover){
  if(typeof cover!=="string"||!PHOTO_REF.test(cover))return false;
  return !!await env.DB.prepare("SELECT id FROM memory_photos WHERE id=? AND family_id=?").bind(cover.slice(6),me.family_id).first();
@@ -73,7 +87,7 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    const essays=(await env.DB.prepare("SELECT version,kind,body,created_at FROM reading_essays WHERE book_id=? ORDER BY version").bind(book.id).all()).results||[];
    const feedback=((await env.DB.prepare("SELECT id,essay_version,parent_id,praise,improve,questions_json,created_at FROM reading_feedback WHERE book_id=? ORDER BY created_at").bind(book.id).all()).results||[]).map(f=>{let questions=[];try{questions=JSON.parse(f.questions_json)}catch{}return {id:f.id,essayVersion:f.essay_version,parentId:f.parent_id,praise:f.praise,improve:f.improve,questions,createdAt:f.created_at}});
    const kindRow=await env.DB.prepare("SELECT kind FROM reading_book_kinds WHERE book_id=?").bind(book.id).first(),detail=await env.DB.prepare("SELECT format,cover FROM reading_book_details WHERE book_id=?").bind(book.id).first();
-   return json({ok:true,book:{id:book.id,childId:book.child_id,title:book.title,author:book.author,status:book.status,kind:kindRow?kindRow.kind:"book",format:detail?detail.format:null,cover:detail?detail.cover:null},answers,essays,feedback});
+   return json({ok:true,book:{id:book.id,childId:book.child_id,title:book.title,author:book.author,status:book.status,kind:kindRow?kindRow.kind:"book",format:detail?detail.format:null,cover:detail?detail.cover:null},answers,essays,feedback,timeline:await buildTimeline(env,book)});
   }
   if(path==="/api/reading/cover"&&req.method==="POST"){
    const b=await readBody(req),book=await loadBook(env,me,b.bookId);
@@ -114,6 +128,7 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    const essay=await env.DB.prepare("SELECT version FROM reading_essays WHERE book_id=? ORDER BY version DESC LIMIT 1").bind(book.id).first();
    if(!essay)return json({error:"독후감을 먼저 저장해주세요."},400);
    await env.DB.prepare("UPDATE reading_books SET status='review',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='writing'").bind(book.id).run();
+   await logEvent(env,newId,book.id,me.id,"submit");
    return json({ok:true,version:essay.version});
   }
   if(path==="/api/reading/feedback"&&req.method==="POST"){
@@ -128,6 +143,7 @@ export async function readingGrowth(req,env,me,json,url,newId,readBody){
    await env.DB.prepare("INSERT INTO reading_feedback(id,book_id,essay_version,parent_id,praise,improve,questions_json) VALUES(?,?,?,?,?,?,?)").bind(newId(),book.id,essay.version,me.id,praise,improve,JSON.stringify(questions)).run();
    const next=b.requestRevision===true?"writing":book.status;
    await env.DB.prepare("UPDATE reading_books SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(next,book.id).run();
+   if(b.requestRevision===true)await logEvent(env,newId,book.id,me.id,"revision_requested");
    return json({ok:true,status:next},201);
   }
   if(path==="/api/reading/finalize"&&req.method==="POST"){

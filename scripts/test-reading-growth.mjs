@@ -13,6 +13,7 @@ async function database({migrate = true} = {}) {
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0002_reading_kinds.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0003_reading_levels.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0004_reading_details.sql', 'utf8'));
+  if (migrate) sql.exec(fs.readFileSync('migrations/reading-growth/0005_reading_events.sql', 'utf8'));
   if (migrate) sql.exec(fs.readFileSync('migrations/memory-photos/0001_memory_photos.sql', 'utf8'));
   for (const f of ['family', 'other']) sql.prepare('INSERT INTO families(id,name) VALUES(?,?)').run(f, f);
   const members = [['admin', 'family', '엄마', 'parent', 1], ['child', 'family', '첫째', 'child', 0], ['sibling', 'family', '둘째', 'child', 0], ['outsider', 'other', '이웃', 'parent', 1]];
@@ -119,7 +120,7 @@ test('books created before kinds existed still read as books', async () => {
 test('migrations only add tables and are safe to run twice', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync('schema.sql', 'utf8'));
-  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql', '0003_reading_levels.sql', '0004_reading_details.sql']) {
+  for (const file of ['0001_reading_growth.sql', '0002_reading_kinds.sql', '0003_reading_levels.sql', '0004_reading_details.sql', '0005_reading_events.sql']) {
     const sql = fs.readFileSync('migrations/reading-growth/' + file, 'utf8');
     assert.doesNotMatch(sql.replace(/ON DELETE (CASCADE|SET NULL)/g, ''), /\b(DROP|ALTER|DELETE|UPDATE)\b/i);
     db.exec(sql); db.exec(sql);
@@ -194,4 +195,35 @@ test('cover photos must be photos stored by the same family and can be added lat
   assert.equal((await call(db, 'POST', '/api/reading/cover', {bookId: plain, cover: theirs}, 'child')).status, 400);
   assert.equal((await call(db, 'POST', '/api/reading/cover', {bookId: plain, cover: mine}, 'child')).status, 200);
   assert.equal((await call(db, 'GET', '/api/reading/book?id=' + plain, undefined, 'admin')).body.book.cover, mine);
+});
+
+test('timeline: every step is listed in order with who did it, including submit and revision request', async () => {
+  const db = await database(); let n = 0;
+  const tick = () => { n++; for (const tb of ['reading_books', 'reading_answers', 'reading_essays', 'reading_feedback', 'reading_events']) db.sql.exec(`UPDATE ${tb} SET created_at='2026-11-13 06:00:${String(n).padStart(2, '0')}' WHERE created_at NOT LIKE '2026-11-13 06:00:%'`); };
+  const step = async (...a) => { const r = await call(db, ...a); tick(); return r; };
+  const id = (await step('POST', '/api/reading/books', {title: '기록', kind: 'performance'}, 'child')).body.id;
+  await step('POST', '/api/reading/answers', {bookId: id, promptId: 'intro1', answer: '처음'}, 'child');
+  await step('POST', '/api/reading/answers', {bookId: id, promptId: 'intro1', answer: '고친 답'}, 'child');
+  await step('POST', '/api/reading/essays', {bookId: id, body: '초안'}, 'child');
+  await step('POST', '/api/reading/submit', {bookId: id}, 'child');
+  await step('POST', '/api/reading/feedback', {bookId: id, praise: '좋아', requestRevision: true}, 'admin');
+  await step('POST', '/api/reading/essays', {bookId: id, body: '수정'}, 'child');
+  await step('POST', '/api/reading/submit', {bookId: id}, 'child');
+  await step('POST', '/api/reading/finalize', {bookId: id}, 'admin');
+  const t = (await call(db, 'GET', '/api/reading/book?id=' + id, undefined, 'child')).body.timeline;
+  const seq = t.map(x => x.action).join(',');
+  assert.match(seq, /^created,answer_saved,answer_edited,essay_saved,submitted,feedback,revision_requested,essay_saved,submitted,finalized$/);
+  assert.equal(t.find(x => x.action === 'feedback').actor, '엄마', 'feedback is attributed to the parent');
+  assert.equal(t.find(x => x.action === 'submitted').actor, '첫째');
+  assert.equal(t.find(x => x.action === 'answer_edited').promptId, 'intro1');
+  assert.equal((await call(db, 'GET', '/api/reading/book?id=' + id, undefined, 'admin')).body.timeline.length, t.length, 'parents see the same trail');
+});
+
+test('timeline still works and actions still succeed when the events table is missing', async () => {
+  const db = await database(); db.sql.exec('DROP TABLE reading_events');
+  const id = (await call(db, 'POST', '/api/reading/books', {title: '기록'}, 'child')).body.id;
+  await call(db, 'POST', '/api/reading/essays', {bookId: id, body: '초안'}, 'child');
+  assert.equal((await call(db, 'POST', '/api/reading/submit', {bookId: id}, 'child')).status, 200, 'submit does not depend on the audit table');
+  const r = await call(db, 'GET', '/api/reading/book?id=' + id, undefined, 'child');
+  assert.equal(r.status, 200); assert.equal(r.body.timeline[0].action, 'created');
 });
