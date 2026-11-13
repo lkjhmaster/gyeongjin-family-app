@@ -70,7 +70,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.locator('#readingPlaceLabel').innerText(), '장소 (선택)');
     assert.equal(await page.locator('#readingFormat option:has-text("국악관현악")').count(), 1, 'gugak orchestra is a performance format');
     assert.equal(await page.locator('#readingFormat option:has-text("미술")').count(), 0, 'exhibition formats are not offered for performances');
-    await page.selectOption('#readingKind', 'exhibition'); assert.equal(await page.locator('#readingFormat option:has-text("미술")').count(), 1);
+    await page.selectOption('#readingKind', 'exhibition'); assert.equal(await page.locator('#readingFormat option:has-text("미술")').count(), 1); assert.equal(await page.locator('#readingFormat option:has-text("영화")').count(), 1, 'movies are offered under 관람');
     await page.selectOption('#readingKind', 'book'); assert.equal(await page.locator('#readingFormatField').isVisible(), false, 'books have no format');
     await page.selectOption('#readingKind', 'performance');
     await page.selectOption('#readingFormat', 'pansori');

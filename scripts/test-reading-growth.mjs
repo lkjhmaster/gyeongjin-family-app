@@ -173,12 +173,14 @@ test('formats: only valid formats for the kind are accepted and they come back i
   assert.equal(orch.status, 201); assert.equal(orch.body.format, 'gugak_orch');
   assert.equal((await make('performance', 'art')).status, 400, 'an exhibition format is not a performance format');
   assert.equal((await make('exhibition', 'museum')).status, 201);
+  assert.equal((await make('exhibition', 'movie')).status, 201, 'movies are a viewing (관람) format');
+  assert.equal((await make('performance', 'movie')).status, 400);
   assert.equal((await make('book', 'opera')).status, 400, 'books have no format');
   assert.equal((await make('performance', 'nope')).status, 400);
   assert.equal((await call(db, 'POST', '/api/reading/books', {title: '판소리 공연', kind: 'performance'}, 'child')).body.format, null, 'format is optional');
   assert.equal((await call(db, 'GET', '/api/reading/book?id=' + orch.body.id, undefined, 'admin')).body.book.format, 'gugak_orch');
   const list = (await call(db, 'GET', '/api/reading/books', undefined, 'child')).body.books;
-  assert.deepEqual(list.map(b => b.format).sort(), ['gugak_orch', 'museum', null]);
+  assert.deepEqual(list.map(b => b.format).sort(), ['gugak_orch', 'movie', 'museum', null]);
 });
 
 test('cover photos must be photos stored by the same family and can be added later by the owner only', async () => {

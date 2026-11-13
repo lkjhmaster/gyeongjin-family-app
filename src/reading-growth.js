@@ -1,6 +1,6 @@
 const MAX_TITLE=100,MAX_AUTHOR=60,MAX_ANSWER=2000,MAX_ESSAY=10000,MAX_FEEDBACK=2000,MAX_QUESTIONS=5;
 const KINDS=["book","performance","exhibition"];
-const FORMATS={performance:["pansori","changgeuk","gugak","gugak_orch","opera","musical","orchestra","choir","play","dance","other"],exhibition:["art","photo","sculpture","museum","science","other"]};
+const FORMATS={performance:["pansori","changgeuk","gugak","gugak_orch","opera","musical","orchestra","choir","play","dance","other"],exhibition:["art","photo","sculpture","museum","science","movie","other"]};
 const PHOTO_REF=/^photo:[0-9a-f-]{36}$/;
 const PROMPT_ID=/^[a-z0-9_]{1,30}$/;
 // Grades advance every January 1 (Korea time), by the family's choice. The calendar year is therefore the "school year".
