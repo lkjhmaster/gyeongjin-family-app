@@ -229,3 +229,12 @@ test('timeline still works and actions still succeed when the events table is mi
   const r = await call(db, 'GET', '/api/reading/book?id=' + id, undefined, 'child');
   assert.equal(r.status, 200); assert.equal(r.body.timeline[0].action, 'created');
 });
+
+test('keywords: the latest kw1 answer comes back in the list for the child and the parent', async () => {
+  const db = await database(), id = (await call(db, 'POST', '/api/reading/books', {title: '낱말 기록'}, 'child')).body.id;
+  assert.equal((await call(db, 'GET', '/api/reading/books', undefined, 'child')).body.books[0].keywords, null, 'none until answered');
+  await call(db, 'POST', '/api/reading/answers', {bookId: id, promptId: 'kw1', answer: '용기'}, 'child');
+  await call(db, 'POST', '/api/reading/answers', {bookId: id, promptId: 'kw1', answer: '용기, 우정'}, 'child');
+  assert.equal((await call(db, 'GET', '/api/reading/books', undefined, 'child')).body.books[0].keywords, '용기, 우정', 'the newest version wins');
+  assert.equal((await call(db, 'GET', '/api/reading/books', undefined, 'admin')).body.books[0].keywords, '용기, 우정');
+});
