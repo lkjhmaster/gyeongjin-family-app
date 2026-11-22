@@ -439,6 +439,30 @@ if(url.pathname==="/api/chores/exemption/review"&&req.method==="POST"){
  const result=await env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,state.value_json).run();if(result.meta?.changes!==1)return json({error:"동시 수정 충돌"},409);
  return json({ok:true,state:item.dayRecords[b.date].state});
 }
+if(url.pathname==="/api/chores/day/undo"&&req.method==="POST"){
+ if(me.is_admin)return json({error:"자녀 계정에서만 취소할 수 있어요."},403);
+ const b=await body(req),id=String(b.id||""),date=String(b.date||""),kst=new Date(Date.now()+9*3600*1000),today=kst.toISOString().slice(0,10),yesterday=new Date(kst.getTime()-86400000).toISOString().slice(0,10);
+ if(!id||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||!(date===today||date===yesterday&&kst.getUTCHours()<8))return json({error:"오늘(또는 오전 8시 이전의 어제) 할 일만 취소할 수 있어요."},400);
+ const saved=await Promise.all(["chores","chore_daily_requests","allowance_audit"].map(k=>env.DB.prepare("SELECT value_json FROM family_state WHERE family_id=? AND state_key=?").bind(me.family_id,k).first()));
+ if(!saved[0])return json({error:"할 일 데이터 없음"},404);
+ let chores,requests,audit;try{chores=JSON.parse(saved[0].value_json);requests=saved[1]?JSON.parse(saved[1].value_json):{};audit=saved[2]?JSON.parse(saved[2].value_json):[]}catch{return json({error:"데이터 형식 오류"},500)}
+ if(!requests||typeof requests!=="object"||Array.isArray(requests)||!Array.isArray(audit))return json({error:"데이터 형식 오류"},500);
+ const rows=chores[me.name],item=Array.isArray(rows)?rows.find(x=>x.id===id):null,record=item?.dayRecords?.[date];
+ if(!item||!record)return json({error:"취소할 완료 기록이 없어요."},404);
+ if(!["done","exempt_requested"].includes(record.state)||record.lateApproved||record.reviewedBy)return json({error:"부모님이 확인한 기록은 바꿀 수 없어요."},409);
+ const key=me.name+"|"+date,request=requests[key];
+ if(request&&request.status!=="pending")return json({error:"부모님이 이미 처리한 날이라 바꿀 수 없어요."},409);
+ const at=new Date().toISOString(),dayRecords={...item.dayRecords};delete dayRecords[date];item.dayRecords=dayRecords;
+ if(request)delete requests[key];
+ audit.unshift({id:Date.now().toString(36),action:"할 일 체크 취소(부모 승인 전)",child:me.name,childId:me.id,childNameAtTime:me.name,actor:me.name,actorId:me.id,at,before:{id:item.id,title:item.title,date,state:record.state,checkedAt:record.checkedAt||record.submittedAt||null,withdrawnDailyRequest:!!request,withdrawnAmount:request?Number(request.amount)||0:0},after:null,identityResolution:"recorded"});
+ const guard=env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE abs(-9223372036854775808) END"),ops=[env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chores' AND value_json=?").bind(JSON.stringify(chores),me.id,me.family_id,saved[0].value_json),guard];
+ if(request)ops.push(env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='chore_daily_requests' AND value_json=?").bind(JSON.stringify(requests),me.id,me.family_id,saved[1].value_json),guard);
+ const nextAudit=JSON.stringify(audit.slice(0,1000));
+ if(saved[2])ops.push(env.DB.prepare("UPDATE family_state SET value_json=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE family_id=? AND state_key='allowance_audit' AND value_json=?").bind(nextAudit,me.id,me.family_id,saved[2].value_json),guard);
+ else ops.push(env.DB.prepare("INSERT INTO family_state(family_id,state_key,value_json,updated_by) VALUES(?,?,?,?)").bind(me.family_id,"allowance_audit",nextAudit,me.id));
+ try{await env.DB.batch(ops)}catch{return json({error:"다른 기기에서 먼저 바뀌었어요. 새로고침 후 다시 시도해주세요."},409)}
+ return json({ok:true,withdrawnRequest:!!request});
+}
 if(url.pathname==="/api/chores/legacy/reverse"&&req.method==="POST"){
  if(!me.is_admin)return json({error:"관리자 전용"},403);
  const b=await body(req),reason=String(b.reason||"").trim();if(typeof b.name!=="string"||typeof b.id!=="string"||reason.length<2||reason.length>500)return json({error:"입력 오류"},400);
