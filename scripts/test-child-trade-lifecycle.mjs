@@ -12,12 +12,11 @@ test('real SQLite: consent, atomic loan, net principal, idempotency, immutable o
  assert.equal((await h.call('p','/state',{key:'allowance_ledger',value:changed,expectedJson:JSON.stringify(before)},'PUT')).status,409);
  assert.throws(()=>h.sql.prepare("UPDATE child_trade_postings SET amount=1").run(),/immutable/);
 });
-test('real SQLite: goods hold protects other writers, two deliveries settle exactly once',async()=>{
+test('real SQLite: goods hold protects other writers, one delivery confirmation settles exactly once',async()=>{
  const h=await fixture(),id=await h.create('goods',{gross:18000,destinationWallet:'card'});const initial=h.ledger();await h.approve(id);assert.deepEqual(h.ledger(),initial);
  const over=structuredClone(initial);over.Alice.push({id:'spend',type:'expense',wallet:'card',amount:3000,status:'approved'});
  assert.throws(()=>h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(over)),/reserved/);
- assert.equal((await h.mutate('a','/child-trades/delivery',id)).status,200);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,0);
- assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);assert.equal(h.row(id).status,'settled');
+ assert.equal((await h.mutate('a','/child-trades/delivery',id)).status,200);assert.equal(h.row(id).status,'settled');
  assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,409);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,2);
 });
 test('real SQLite: partial and full repayment reduce only received principal; overpayment blocked',async()=>{
@@ -128,7 +127,7 @@ test('goods combine three wallets, reserve without spending, and settle every le
  const state=h.ledger();state.Alice.push({id:'overspend',wallet:'minus',type:'expense',amount:4600,status:'approved'});
  assert.throws(()=>h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_ledger'").run(JSON.stringify(state)),/reserved/);
  assert.throws(()=>h.sql.prepare("UPDATE family_state SET value_json=? WHERE state_key='allowance_limits'").run(JSON.stringify({Alice:400,Bob:5000})),/reserved/);
- await h.mutate('a','/child-trades/delivery',id);assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,200);
+ assert.equal((await h.mutate('a','/child-trades/delivery',id)).status,200);
  const debits=h.sql.prepare("SELECT wallet,amount FROM child_trade_postings WHERE kind='debit' ORDER BY wallet").all();assert.deepEqual(debits.map(d=>[d.wallet,d.amount]),[['card',-400],['free',-300],['minus',-500]]);
  assert.equal(h.sql.prepare('SELECT SUM(amount) n FROM child_trade_postings').get().n,0);assert.equal(h.ledger().Bob.filter(r=>r.childTradeId===id&&r.type==='income').reduce((n,r)=>n+r.amount,0),1200);
  assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,409);assert.equal(h.sql.prepare("SELECT COUNT(*) n FROM child_trade_funding WHERE hold_status='active'").get().n,0);
@@ -159,8 +158,8 @@ test('invalid splits and changed retry allocations do not create or duplicate a 
  assert.equal((await h.call('a','/child-trades',{...base,allocations:{free:500,card:700}})).status,409);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_transactions').get().n,1);
 });
 test('split settlement failures roll back reservation releases and every financial leg',async()=>{
- const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split});await h.approve(id);await h.mutate('a','/child-trades/delivery',id);const before=h.ledger();h.fail(6);
- assert.equal((await h.mutate('b','/child-trades/delivery',id)).status,409);assert.deepEqual(h.ledger(),before);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,0);assert.equal(h.sql.prepare("SELECT COUNT(*) n FROM child_trade_funding WHERE hold_status='active'").get().n,3);
+ const h=await fixture(),id=await h.create('goods',{gross:1200,allocations:split});await h.approve(id);const before=h.ledger();h.fail(6);
+ assert.equal((await h.mutate('a','/child-trades/delivery',id)).status,409);assert.deepEqual(h.ledger(),before);assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,0);assert.equal(h.sql.prepare("SELECT COUNT(*) n FROM child_trade_funding WHERE hold_status='active'").get().n,3);
 });
 test('cumulative wallet refunds are monotonic and exact even at one-won boundaries',()=>{
  for(const gross of [[1,1,1],[3,7,11],[13,23,31]]){
@@ -231,4 +230,19 @@ test('refund and amendment requests reach only the other participant and block d
  const inbox=async actor=>(await h.call(actor,'/child-trades/notifications')).data;
  assert.deepEqual((await inbox('a')).requests,[]);assert.equal((await inbox('b')).requests.length,1);assert.equal((await inbox('b')).requests[0].actionId,change.data.actionId);assert.equal((await inbox('b')).requests[0].kind,'action');assert.deepEqual((await inbox('c')).waiting,[]);
  await h.mutate('b','/child-trades/action/decision',id,{actionId:change.data.actionId,decision:'consent'});assert.deepEqual((await inbox('b')).requests,[]);assert.equal((await inbox('a')).waiting.length,1);
+});
+test('4-step goods flow: seller alone settles; buyer alone settles; settled trade can still be disputed',async()=>{
+ for(const actor of ['a','b']){
+  const h=await fixture(),id=await h.create('goods',{gross:700,destinationWallet:'card'});await h.approve(id);
+  assert.equal(h.row(id).status,'held');
+  assert.equal((await h.mutate(actor,'/child-trades/delivery',id)).status,200);assert.equal(h.row(id).status,'settled');
+  assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM child_trade_postings').get().n,2);
+  assert.equal((await h.mutate('a','/child-trades/dispute',id,{reason:'못 받았어요'})).status,200);assert.equal(h.row(id).status,'disputed');
+ }
+});
+test('legacy half-confirmed trade (one side already confirmed) settles when the other side confirms',async()=>{
+ const h=await fixture(),id=await h.create('goods',{gross:900,destinationWallet:'card'});await h.approve(id);
+ h.sql.prepare("INSERT INTO child_trade_delivery(transaction_id,actor_id,revision,created_at) VALUES(?,?,?,?)").run(id,'b',h.row(id).revision,new Date().toISOString());
+ h.sql.prepare("UPDATE child_trade_transactions SET status='delivery_pending' WHERE id=?").run(id);
+ assert.equal((await h.mutate('a','/child-trades/delivery',id)).status,200);assert.equal(h.row(id).status,'settled');
 });

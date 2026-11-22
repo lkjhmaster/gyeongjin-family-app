@@ -265,9 +265,8 @@ export async function childTradeLifecycle(req,env,me,json){
    requireTrade(participant&&!me.is_admin,'거래 당사자만 전달 확인할 수 있습니다.',403);requireTrade(tx.kind==='goods'&&['held','delivery_pending'].includes(tx.status)&&!open,'전달 확인이 보류되었거나 완료되었습니다.');
    requireTrade(!tables.delivery.some(d=>d.transaction_id===tx.id&&d.actor_id===me.id&&d.revision>=(detail(tx).delivery_epoch||0)),'이미 전달 확인했습니다.');
    add('INSERT INTO child_trade_delivery(transaction_id,actor_id,revision,created_at) VALUES(?,?,?,?)',tx.id,me.id,tx.revision,now);
-   const both=tables.delivery.some(d=>d.transaction_id===tx.id&&d.actor_id!==me.id&&d.revision>=(detail(tx).delivery_epoch||0));
-   if(both){const hold=held(tx);requireTrade(hold&&hold.gross_amount===tx.gross_amount,'예약금 원장 오류');releaseFunding(tx,'released');transfer(tx);change(tx,'settled');audit(tx,'delivery_settle','settled');}
-   else{change(tx,'delivery_pending');audit(tx,'delivery','delivery_pending');}
+   // 4단계 정책: 당사자 한 명의 전달 확인으로 정산한다. 정산 후 이의가 있으면 분쟁 신청을 쓴다.
+   {const hold=held(tx);requireTrade(hold&&hold.gross_amount===tx.gross_amount,'예약금 원장 오류');releaseFunding(tx,'released');transfer(tx);change(tx,'settled');audit(tx,'delivery_settle','settled');}
    return await commit({ok:true});
   }
   if(path==='/dispute'){

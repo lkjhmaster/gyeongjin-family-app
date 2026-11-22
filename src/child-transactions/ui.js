@@ -1,4 +1,4 @@
-const tradeActionName={request:'신청',consent:'동의',reject:'거절',cancel:'취소',reserve:'승인·예약',settle:'승인·정산',delivery:'전달 확인',delivery_settle:'양측 전달·정산',terms_changed:'조건 변경',dispute:'분쟁 신청',request_refund:'환불 협의',request_cancel:'취소 협의',request_revise:'조건 변경 협의',request_resolve:'분쟁 해제 협의',action_consent:'변경 동의',action_reject:'변경 거절',action_cancel:'변경 요청 취소',approve_refund:'환불 승인',approve_cancel:'취소 승인',approve_revise:'조건 변경 승인',approve_resolve:'분쟁 해제 승인',refund_insufficient_balance:'회수 잔액 부족·부모 조정',receipt_selected:'판매자 수령 선택·구매자 확인 대기'};
+const tradeActionName={request:'신청',consent:'동의',reject:'거절',cancel:'취소',reserve:'승인·예약',settle:'승인·정산',delivery:'전달 확인',delivery_settle:'전달 확인·정산',terms_changed:'조건 변경',dispute:'분쟁 신청',request_refund:'환불 협의',request_cancel:'취소 협의',request_revise:'조건 변경 협의',request_resolve:'분쟁 해제 협의',action_consent:'변경 동의',action_reject:'변경 거절',action_cancel:'변경 요청 취소',approve_refund:'환불 승인',approve_cancel:'취소 승인',approve_revise:'조건 변경 승인',approve_resolve:'분쟁 해제 승인',refund_insufficient_balance:'회수 잔액 부족·부모 조정',receipt_selected:'판매자 수령 선택·구매자 확인 대기'};
 const tradeWalletName={free:'자유용돈',card:'카드용돈',minus:'마이너스'};
 const tradeStateName={requested:'상대방 동의 대기',consented:'부모 승인 대기',held:'예약 중',delivery_pending:'전달 확인 중',active:'상환 중',settled:'완료',cancelled:'취소',rejected:'거절',disputed:'분쟁 조정 중'};
 let childTradeScreen=null;
@@ -48,7 +48,7 @@ async function childTradeSaveReceipt(){
  const data={transactionId:tx.id,revision:tx.revision,destinationWallet,destinationDebtId:destinationWallet==='minus'?$('#tradeReceiptDebt').value:null};
  const quote=await api('/api/child-trades/receipt/quote',{method:'POST',body:JSON.stringify(data)});
  const summary='구매자 총 출금 '+quote.gross.toLocaleString()+'원 · 수수료 '+quote.fee.toLocaleString()+'원 · 내가 받는 금액 '+quote.net.toLocaleString()+'원';$('#tradeReceiptQuote').textContent=summary;
- if(!confirm(summary+'\n수령 설정에 동의하고 구매자에게 최종 확인을 요청할까요?'))return;
+ if(!confirm(summary+'\n수령 설정에 동의하고 부모님 승인을 요청할까요?'))return;
  await api('/api/child-trades/receipt',{method:'POST',body:JSON.stringify(data)});await childTradeDetail(tx.id);
 }
 async function childTradeCommand(button){
