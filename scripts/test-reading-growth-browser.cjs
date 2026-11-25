@@ -62,6 +62,15 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.evaluate(() => readingRender()); assert.ok((await page.locator('.page').innerText()).includes('#판소리'), 'keywords show as chips'); assert.ok((await page.locator('.page').innerText()).includes('#화충선생젼'));
     for (const width of [320, 360, 768]) { await page.setViewportSize({width, height: 800}); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal scroll at ' + width); }
     await page.click('text=독후감'); await page.waitForSelector('text=내가 쓴 활동 답변 보기');
+    assert.ok((await page.locator('.page').innerText()).includes('쓰는 틀'), 'beginner writing frame is shown before the essay box');
+    assert.ok((await page.locator('.page').innerText()).includes('처음 · 이 책을 고른 까닭'));
+    await page.click('text=이 틀로 시작하기');
+    const framed = await page.locator('#readingEssay').inputValue();
+    assert.match(framed, /나는 『새 책』을 읽었다\./); assert.match(framed, /고른 까닭은 ______ 때문이다/); assert.match(framed, /가장 말하고 싶은 것은 ______이다/);
+    const lvl = await page.evaluate(() => readingLevel());
+    assert.equal((framed.match(/\n\n/g) || []).length, lvl === 'g8' ? 4 : 3, 'g8 has an extra middle part; younger levels have four parts');
+    assert.equal(await page.evaluate(() => { const g = readingView.myGrade; readingView.myGrade = 4; const n = readingFrameSteps().length; readingView.myGrade = 8; const m = readingFrameSteps().length; readingView.myGrade = g; return n + '/' + m; }), '4/5');
+    assert.equal(await page.evaluate(() => readingJosa('어린 왕자','을','를') + readingJosa('책','을','를')), '를을', 'object particle follows the final sound');
     await page.evaluate(() => { currentAccount = {id: 'p', name: 'Parent', isAdmin: true}; readingView.book.book.status = 'review'; readingView.book.essays = [{version: 1, kind: 'draft', body: '제출한 독후감 본문', created_at: '2026-11-10'}]; readingView.tab = 'feedback'; readingRender(); });
     await page.waitForSelector('text=제출한 독후감 본문');
     assert.equal(await page.locator('#fbPraise').count(), 1, 'parent reads the essay above the feedback form');
