@@ -67,6 +67,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.click('text=이 틀로 시작하기');
     const framed = await page.locator('#readingEssay').inputValue();
     assert.match(framed, /나는 『새 책』을 읽었다\./); assert.match(framed, /고른 까닭은 ______ 때문이다/); assert.match(framed, /가장 말하고 싶은 것은 ______이다/);
+    assert.equal(await page.evaluate(() => { const out = []; for (const kind of ['book', 'performance', 'exhibition']) { readingView.book.book.kind = kind; out.push(readingFrameText().split('\n').filter(l => /고른 까닭|떠올리면/.test(l)).map(l => l.slice(0, 6)).join('|')); } readingView.book.book.kind = 'book'; return out.join(','); }), '이 책을 고|이 책을 떠,이 공연을 |이 공연을 ,이 전시를 |이 전시를 ', 'object particle agrees with the noun for every kind');
     const lvl = await page.evaluate(() => readingLevel());
     assert.equal((framed.match(/\n\n/g) || []).length, lvl === 'g8' ? 4 : 3, 'g8 has an extra middle part; younger levels have four parts');
     assert.equal(await page.evaluate(() => { const g = readingView.myGrade; readingView.myGrade = 4; const n = readingFrameSteps().length; readingView.myGrade = 8; const m = readingFrameSteps().length; readingView.myGrade = g; return n + '/' + m; }), '4/5');
