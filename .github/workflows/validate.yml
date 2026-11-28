@@ -56,6 +56,7 @@ jobs:
           "$RUNNER_TEMP/family-browser/node_modules/.bin/playwright" install --with-deps chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-child-trade-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-choice-dialog.cjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-exemption-group-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-aggregate-repayment-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-wallet-balances-browser.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/family-browser/node_modules/playwright" node scripts/test-memory-photos-browser.cjs
